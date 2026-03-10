@@ -163,19 +163,11 @@ class NotificationService {
     required int startPeriod,
     required AppSettings settings,
   }) {
-    if (startPeriod <= 0 || startPeriod > settings.periodStartTimes.length) {
+    final int? startMinutes = periodStartMinutesAt(settings, startPeriod);
+    if (startMinutes == null) {
       return null;
     }
-    final String period = settings.periodStartTimes[startPeriod - 1];
-    final List<String> parts = period.split(':');
-    if (parts.length != 2) {
-      return null;
-    }
-    final int? hour = int.tryParse(parts[0]);
-    final int? minute = int.tryParse(parts[1]);
-    if (hour == null || minute == null) {
-      return null;
-    }
-    return DateTime(date.year, date.month, date.day, hour, minute);
+    final int safe = startMinutes.clamp(0, 24 * 60 - 1);
+    return DateTime(date.year, date.month, date.day, safe ~/ 60, safe % 60);
   }
 }

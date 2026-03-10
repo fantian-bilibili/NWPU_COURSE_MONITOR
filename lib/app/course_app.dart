@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/models.dart';
@@ -21,7 +21,8 @@ class CourseMonitorApp extends StatelessWidget {
       builder: (BuildContext context, _) {
         return MaterialApp(
           debugShowCheckedModeBanner: false,
-          title: '\u8bfe\u8868\u7ba1\u5bb6',
+          title: '课表管家',
+          scrollBehavior: const _DesktopSmoothScrollBehavior(),
           theme: _buildTheme(Brightness.light),
           darkTheme: _buildTheme(Brightness.dark),
           themeMode: appState.settings.themeModeSetting.toThemeMode(),
@@ -151,6 +152,45 @@ class CourseMonitorApp extends StatelessWidget {
   }
 }
 
+class _DesktopSmoothScrollBehavior extends MaterialScrollBehavior {
+  const _DesktopSmoothScrollBehavior();
+
+  static const double _desktopScrollScale = 0.62;
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    final ScrollPhysics base = super.getScrollPhysics(context);
+    final TargetPlatform platform = kIsWeb
+        ? getPlatform(context)
+        : defaultTargetPlatform;
+    final bool desktop =
+        platform == TargetPlatform.windows ||
+        platform == TargetPlatform.macOS ||
+        platform == TargetPlatform.linux;
+    if (!desktop) {
+      return base;
+    }
+    return _ScaledScrollPhysics(parent: base, scale: _desktopScrollScale);
+  }
+}
+
+class _ScaledScrollPhysics extends ScrollPhysics {
+  const _ScaledScrollPhysics({required this.scale, super.parent});
+
+  final double scale;
+
+  @override
+  _ScaledScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return _ScaledScrollPhysics(scale: scale, parent: buildParent(ancestor));
+  }
+
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
+    final double adjusted = super.applyPhysicsToUserOffset(position, offset);
+    return adjusted * scale;
+  }
+}
+
 class CourseHomeShell extends StatefulWidget {
   const CourseHomeShell({super.key, required this.appState});
 
@@ -163,19 +203,16 @@ class CourseHomeShell extends StatefulWidget {
 class _CourseHomeShellState extends State<CourseHomeShell> {
   int _index = 0;
   String? _lastMessage;
-  late final PageController _pageController;
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController();
     widget.appState.addListener(_onStateUpdated);
   }
 
   @override
   void dispose() {
     widget.appState.removeListener(_onStateUpdated);
-    _pageController.dispose();
     super.dispose();
   }
 
@@ -191,22 +228,10 @@ class _CourseHomeShellState extends State<CourseHomeShell> {
   }
 
   void _onDestinationSelected(int value) {
-    int currentPage = _index;
-    if (_pageController.hasClients) {
-      currentPage = (_pageController.page ?? _index.toDouble()).round();
-    }
-    if (value == _index && value == currentPage) {
+    if (value == _index) {
       return;
     }
     setState(() => _index = value);
-    if (!_pageController.hasClients) {
-      return;
-    }
-    _pageController.animateToPage(
-      value,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-    );
   }
 
   bool _isDesktopLayout(BuildContext context) {
@@ -222,26 +247,54 @@ class _CourseHomeShellState extends State<CourseHomeShell> {
         defaultTargetPlatform == TargetPlatform.linux;
   }
 
+  Widget _buildCurrentPage() {
+    return switch (_index) {
+      0 => SchedulePage(
+        key: const ValueKey<String>('page-schedule'),
+        appState: widget.appState,
+      ),
+      1 => ImportPage(
+        key: const ValueKey<String>('page-import'),
+        appState: widget.appState,
+      ),
+      2 => GpaPage(
+        key: const ValueKey<String>('page-gpa'),
+        appState: widget.appState,
+      ),
+      _ => SettingsPage(
+        key: const ValueKey<String>('page-settings'),
+        appState: widget.appState,
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    final List<Widget> pages = <Widget>[
-      SchedulePage(appState: widget.appState),
-      ImportPage(appState: widget.appState),
-      GpaPage(appState: widget.appState),
-      SettingsPage(appState: widget.appState),
-    ];
-
     final bool desktop = _isDesktopLayout(context);
 
     return Scaffold(
       body: Stack(
         children: <Widget>[
           SafeArea(
-            child: PageView(
-              controller: _pageController,
-              physics: const NeverScrollableScrollPhysics(),
-              onPageChanged: (int value) => setState(() => _index = value),
-              children: pages,
+            child: RepaintBoundary(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                switchInCurve: Curves.easeOutCubic,
+                switchOutCurve: Curves.easeInCubic,
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: Tween<Offset>(
+                        begin: const Offset(0.018, 0),
+                        end: Offset.zero,
+                      ).animate(animation),
+                      child: child,
+                    ),
+                  );
+                },
+                child: _buildCurrentPage(),
+              ),
             ),
           ),
           if (widget.appState.busy)
@@ -365,21 +418,21 @@ const List<NavigationDestination> _destinations = <NavigationDestination>[
   NavigationDestination(
     icon: Icon(Icons.calendar_month_outlined),
     selectedIcon: Icon(Icons.calendar_month),
-    label: '\u8bfe\u8868',
+    label: '课表',
   ),
   NavigationDestination(
     icon: Icon(Icons.file_upload_outlined),
     selectedIcon: Icon(Icons.file_upload),
-    label: '\u5bfc\u5165',
+    label: '导入',
   ),
   NavigationDestination(
     icon: Icon(Icons.calculate_outlined),
     selectedIcon: Icon(Icons.calculate),
-    label: '\u7ee9\u70b9',
+    label: '绩点',
   ),
   NavigationDestination(
     icon: Icon(Icons.tune_outlined),
     selectedIcon: Icon(Icons.tune),
-    label: '\u8bbe\u7f6e',
+    label: '设置',
   ),
 ];

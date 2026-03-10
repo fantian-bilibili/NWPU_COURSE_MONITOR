@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <algorithm>
+#include <cstring>
 #include <dwmapi.h>
 #include <optional>
 #include <string>
@@ -64,26 +65,33 @@ struct WINDOWCOMPOSITIONATTRIBDATA {
 using SetWindowCompositionAttributeFn =
     BOOL(WINAPI*)(HWND, WINDOWCOMPOSITIONATTRIBDATA*);
 
-bool ParseEnabledArgument(
-    const flutter::MethodCall<flutter::EncodableValue>& call) {
-  bool enabled = false;
+bool ParseBoolArgument(const flutter::MethodCall<flutter::EncodableValue>& call,
+                       const char* key, bool fallback = false) {
+  bool value_result = fallback;
   const flutter::EncodableValue* arguments = call.arguments();
   if (arguments == nullptr) {
-    return false;
+    return fallback;
   }
 
   if (const auto* map = std::get_if<flutter::EncodableMap>(arguments)) {
-    const auto iterator = map->find(flutter::EncodableValue("enabled"));
+    const auto iterator = map->find(flutter::EncodableValue(key));
     if (iterator != map->end()) {
-      if (const bool* value = std::get_if<bool>(&iterator->second)) {
-        enabled = *value;
+      if (const bool* parsed = std::get_if<bool>(&iterator->second)) {
+        value_result = *parsed;
       }
     }
-  } else if (const bool* value = std::get_if<bool>(arguments)) {
-    enabled = *value;
+  } else if (std::strcmp(key, "enabled") == 0) {
+    if (const bool* parsed = std::get_if<bool>(arguments)) {
+      value_result = *parsed;
+    }
   }
 
-  return enabled;
+  return value_result;
+}
+
+bool ParseEnabledArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& call) {
+  return ParseBoolArgument(call, "enabled", false);
 }
 
 bool ApplyAccentPolicy(HWND window, ACCENT_STATE accent_state,
@@ -237,7 +245,9 @@ void FlutterWindow::RegisterDesktopChannel() {
 
         if (call.method_name() == kSetAutoStartMethod) {
           const bool enabled = ParseEnabledArgument(call);
-          const bool applied = SetAutoStart(enabled);
+          const bool start_in_mini_mode =
+              ParseBoolArgument(call, "startMini", false);
+          const bool applied = SetAutoStart(enabled, start_in_mini_mode);
           result->Success(flutter::EncodableValue(applied));
           return;
         }
@@ -421,7 +431,7 @@ bool FlutterWindow::SetMiniWindowDark(bool enabled) {
   return true;
 }
 
-bool FlutterWindow::SetAutoStart(bool enabled) {
+bool FlutterWindow::SetAutoStart(bool enabled, bool start_in_mini_mode) {
   HKEY key = nullptr;
   const LONG open_status =
       RegCreateKeyExW(HKEY_CURRENT_USER, kAutoStartRegKey, 0, nullptr, 0,
@@ -440,6 +450,9 @@ bool FlutterWindow::SetAutoStart(bool enabled) {
     std::wstring command = L"\"";
     command += module_path;
     command += L"\"";
+    if (start_in_mini_mode) {
+      command += L" --windows-mini-window";
+    }
 
     status = RegSetValueExW(
         key, kAutoStartValueName, 0, REG_SZ,

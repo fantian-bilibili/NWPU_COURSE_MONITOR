@@ -257,14 +257,7 @@ class WidgetSyncService {
     required CourseSession session,
     required AppSettings settings,
   }) {
-    final int? startMinutes = _periodStartMinutes(
-      settings: settings,
-      period: session.startPeriod,
-    );
-    if (startMinutes == null) {
-      return null;
-    }
-    return _dateAtMinutes(date, startMinutes);
+    return sessionStartAt(date: date, session: session, settings: settings);
   }
 
   DateTime? _sessionEndAt({
@@ -272,62 +265,7 @@ class WidgetSyncService {
     required CourseSession session,
     required AppSettings settings,
   }) {
-    final int? nextPeriodMinutes = _periodStartMinutes(
-      settings: settings,
-      period: session.endPeriod + 1,
-    );
-    if (nextPeriodMinutes != null) {
-      return _dateAtMinutes(date, nextPeriodMinutes);
-    }
-
-    final DateTime? startAt = _sessionStartAt(
-      date: date,
-      session: session,
-      settings: settings,
-    );
-    if (startAt == null) {
-      return null;
-    }
-    final int periods = (session.endPeriod - session.startPeriod + 1).clamp(
-      1,
-      24,
-    );
-    return startAt.add(
-      Duration(minutes: periods * settings.periodDurationMinutes),
-    );
-  }
-
-  int? _periodStartMinutes({
-    required AppSettings settings,
-    required int period,
-  }) {
-    if (period <= 0) {
-      return null;
-    }
-    if (period - 1 < settings.periodStartTimes.length) {
-      final int? fromSetting = timeTextToMinutes(
-        settings.periodStartTimes[period - 1],
-      );
-      if (fromSetting != null) {
-        return fromSetting;
-      }
-    }
-    final int? dayStart = timeTextToMinutes(settings.dayStartTime);
-    if (dayStart == null) {
-      return null;
-    }
-    return dayStart + (period - 1) * settings.periodDurationMinutes;
-  }
-
-  DateTime _dateAtMinutes(DateTime date, int minutesOfDay) {
-    final int safeMinutes = minutesOfDay.clamp(0, 24 * 60 - 1);
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      safeMinutes ~/ 60,
-      safeMinutes % 60,
-    );
+    return sessionEndAt(date: date, session: session, settings: settings);
   }
 
   String _buildMetaLine(_WidgetCourseItem item) {

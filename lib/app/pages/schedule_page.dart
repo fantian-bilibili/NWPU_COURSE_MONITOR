@@ -758,12 +758,23 @@ class _WeekGridBody extends StatelessWidget {
     required double headH,
     required double rowH,
   }) {
-    final List<_GridBlock> blocks = _buildMergedBlocks(date);
-    return blocks.map((_GridBlock block) {
+    final List<_GridPlacement> placements = _layoutBlocks(date);
+    return placements.map((_GridPlacement placement) {
+      const double sidePadding = 4;
+      const double laneGap = 3;
+      final double contentLeft = leftW + dayIndex * dayW + sidePadding;
+      final double contentWidth = dayW - sidePadding * 2;
+      final double width =
+          (contentWidth -
+              laneGap *
+                  (placement.laneCount > 0 ? placement.laneCount - 1 : 0)) /
+          placement.laneCount;
+      final double left = contentLeft + placement.laneIndex * (width + laneGap);
+      final _GridBlock block = placement.block;
       return Positioned(
-        left: leftW + dayIndex * dayW + 4,
+        left: left,
         top: headH + (block.start - 1) * rowH + 4,
-        width: dayW - 8,
+        width: width,
         height: (block.end - block.start + 1) * rowH - 8,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
@@ -788,7 +799,7 @@ class _WeekGridBody extends StatelessWidget {
                 Text('${block.start}-${block.end} 节', maxLines: 1),
                 Text(
                   block.course.location.isEmpty
-                      ? '未设置地点'
+                      ? '地点待补充'
                       : block.course.location,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -799,6 +810,99 @@ class _WeekGridBody extends StatelessWidget {
         ),
       );
     }).toList();
+  }
+
+  List<_GridPlacement> _layoutBlocks(DateTime date) {
+    final List<_GridBlock> blocks = _buildMergedBlocks(date);
+    if (blocks.isEmpty) {
+      return const <_GridPlacement>[];
+    }
+
+    blocks.sort((a, b) {
+      final int byStart = a.start.compareTo(b.start);
+      if (byStart != 0) {
+        return byStart;
+      }
+      final int byEnd = a.end.compareTo(b.end);
+      if (byEnd != 0) {
+        return byEnd;
+      }
+      return a.course.name.compareTo(b.course.name);
+    });
+
+    final List<_GridPlacement> placements = <_GridPlacement>[];
+    List<_GridBlock> currentGroup = <_GridBlock>[];
+    int groupEnd = -1;
+
+    for (final _GridBlock block in blocks) {
+      if (currentGroup.isEmpty) {
+        currentGroup = <_GridBlock>[block];
+        groupEnd = block.end;
+        continue;
+      }
+      if (block.start <= groupEnd) {
+        currentGroup.add(block);
+        groupEnd = math.max(groupEnd, block.end);
+        continue;
+      }
+      placements.addAll(_layoutConflictGroup(currentGroup));
+      currentGroup = <_GridBlock>[block];
+      groupEnd = block.end;
+    }
+
+    if (currentGroup.isNotEmpty) {
+      placements.addAll(_layoutConflictGroup(currentGroup));
+    }
+    return placements;
+  }
+
+  List<_GridPlacement> _layoutConflictGroup(List<_GridBlock> group) {
+    if (group.length == 1) {
+      return <_GridPlacement>[
+        _GridPlacement(block: group.first, laneIndex: 0, laneCount: 1),
+      ];
+    }
+
+    final List<_GridBlock> sorted = List<_GridBlock>.from(group)
+      ..sort((a, b) {
+        final int byStart = a.start.compareTo(b.start);
+        if (byStart != 0) {
+          return byStart;
+        }
+        return a.end.compareTo(b.end);
+      });
+
+    final List<int> laneEnds = <int>[];
+    final List<({int laneIndex, _GridBlock block})> indexed =
+        <({int laneIndex, _GridBlock block})>[];
+
+    for (final _GridBlock block in sorted) {
+      int laneIndex = -1;
+      for (int i = 0; i < laneEnds.length; i++) {
+        if (block.start > laneEnds[i]) {
+          laneIndex = i;
+          break;
+        }
+      }
+      if (laneIndex == -1) {
+        laneEnds.add(block.end);
+        laneIndex = laneEnds.length - 1;
+      } else {
+        laneEnds[laneIndex] = block.end;
+      }
+      indexed.add((laneIndex: laneIndex, block: block));
+    }
+
+    final int laneCount = laneEnds.length;
+    return indexed
+        .map(
+          (({int laneIndex, _GridBlock block}) item) => _GridPlacement(
+            block: item.block,
+            laneIndex: item.laneIndex,
+            laneCount: laneCount,
+          ),
+        )
+        .toList();
   }
 
   List<_GridBlock> _buildMergedBlocks(DateTime date) {
@@ -956,4 +1060,16 @@ class _GridBlock {
       end: end ?? this.end,
     );
   }
+}
+
+class _GridPlacement {
+  const _GridPlacement({
+    required this.block,
+    required this.laneIndex,
+    required this.laneCount,
+  });
+
+  final _GridBlock block;
+  final int laneIndex;
+  final int laneCount;
 }

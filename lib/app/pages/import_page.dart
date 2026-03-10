@@ -10,6 +10,8 @@ import '../../state/app_state.dart';
 import '../widgets/frosted_panel.dart';
 import 'jwxt_import_webview_page.dart';
 
+enum _ImportMode { merge, replace }
+
 class ImportPage extends StatefulWidget {
   const ImportPage({super.key, required this.appState});
 
@@ -20,9 +22,11 @@ class ImportPage extends StatefulWidget {
 }
 
 class _ImportPageState extends State<ImportPage> {
-  bool _replaceExisting = false;
+  _ImportMode _importMode = _ImportMode.merge;
   bool _applySettingsOnImport = true;
   bool _includeSettingsInJsonExport = true;
+
+  bool get _replaceExisting => _importMode == _ImportMode.replace;
 
   bool get _mobileWebImportSupported =>
       !kIsWeb &&
@@ -32,53 +36,13 @@ class _ImportPageState extends State<ImportPage> {
   @override
   Widget build(BuildContext context) {
     final AppState state = widget.appState;
-    final List<_ImportAction> actions = <_ImportAction>[
-      if (_mobileWebImportSupported)
-        _ImportAction(
-          icon: Icons.download_for_offline_outlined,
-          title: '手机端一键导入',
-          description: '登录教务后进入课表页，点击提取并写入当前学期。',
-          onTap: _startWebViewImport,
-        ),
-      _ImportAction(
-        icon: Icons.file_open_outlined,
-        title: '导入当前学期 JSON/CSV',
-        description: '导入到当前选中的学期，可选择合并或覆盖。',
-        onTap: _pickAndImportCurrentSemesterFile,
-      ),
-      _ImportAction(
-        icon: Icons.file_download_outlined,
-        title: '导出当前学期 JSON',
-        description: '仅导出当前学期的课程和成绩。',
-        onTap: () => _exportCurrentSemester(json: true),
-      ),
-      _ImportAction(
-        icon: Icons.table_rows_outlined,
-        title: '导出当前学期 CSV',
-        description: '适合在电脑表格软件中查看和编辑。',
-        onTap: () => _exportCurrentSemester(json: false),
-      ),
-      _ImportAction(
-        icon: Icons.cloud_upload_outlined,
-        title: '导入全部学期 JSON',
-        description: '恢复完整学期数据（含学期列表、课程、成绩）。',
-        onTap: _pickAndImportAllSemestersFile,
-      ),
-      _ImportAction(
-        icon: Icons.ios_share_outlined,
-        title: '一键导出全部学期',
-        description: '生成完整备份 JSON，便于跨设备迁移。',
-        onTap: _exportAllSemestersJson,
-      ),
-    ];
-
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            '导入导出',
+            '导入与导出',
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -88,61 +52,166 @@ class _ImportPageState extends State<ImportPage> {
             '当前学期：${state.currentSemester.name}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(height: 8),
-          FrostedPanel(
-            enabled: state.settings.frostedCards,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('导入时覆盖现有数据'),
-                subtitle: const Text('关闭时合并去重，开启时直接替换。'),
-                value: _replaceExisting,
-                onChanged: (bool value) {
-                  setState(() => _replaceExisting = value);
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          FrostedPanel(
-            enabled: state.settings.frostedCards,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: <Widget>[
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('导入时应用作息设置'),
-                    subtitle: const Text('JSON 包含作息与提醒参数时，同步到当前设备。'),
-                    value: _applySettingsOnImport,
-                    onChanged: (bool value) {
-                      setState(() => _applySettingsOnImport = value);
-                    },
-                  ),
-                  const Divider(height: 1),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('JSON 导出包含作息设置'),
-                    subtitle: const Text('CSV 仍仅导出课程与成绩，不包含作息设置。'),
-                    value: _includeSettingsInJsonExport,
-                    onChanged: (bool value) {
-                      setState(() => _includeSettingsInJsonExport = value);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          FrostedPanel(
-            enabled: state.settings.frostedCards,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: _ActionGrid(actions: actions),
-            ),
-          ),
+          const SizedBox(height: 10),
+          _buildImportConfigPanel(state),
+          const SizedBox(height: 10),
+          _buildImportActionPanel(state),
+          const SizedBox(height: 10),
+          _buildExportActionPanel(state),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImportConfigPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('导入设置', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            SegmentedButton<_ImportMode>(
+              segments: const <ButtonSegment<_ImportMode>>[
+                ButtonSegment<_ImportMode>(
+                  value: _ImportMode.merge,
+                  icon: Icon(Icons.merge_type_outlined),
+                  label: Text('合并去重'),
+                ),
+                ButtonSegment<_ImportMode>(
+                  value: _ImportMode.replace,
+                  icon: Icon(Icons.content_cut_outlined),
+                  label: Text('覆盖替换'),
+                ),
+              ],
+              selected: <_ImportMode>{_importMode},
+              onSelectionChanged: (Set<_ImportMode> value) {
+                setState(() => _importMode = value.first);
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _replaceExisting
+                  ? '当前导入模式：使用新数据完整替换目标学期内容。'
+                  : '当前导入模式：在保留原数据的基础上合并去重。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('导入时同步作息与提醒设置'),
+              subtitle: const Text('当 JSON 包含设置项时，将作息和提醒策略一起恢复。'),
+              value: _applySettingsOnImport,
+              onChanged: (bool value) {
+                setState(() => _applySettingsOnImport = value);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildImportActionPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('导入', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '推荐顺序：先用「导入当前学期文件」，完整迁移再用「导入全部学期」。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            if (_mobileWebImportSupported)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _startWebViewImport,
+                  icon: const Icon(Icons.language_outlined),
+                  label: const Text('手机端一键教务导入'),
+                ),
+              ),
+            if (_mobileWebImportSupported) const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _pickAndImportCurrentSemesterFile,
+                icon: const Icon(Icons.file_open_outlined),
+                label: const Text('导入当前学期文件（JSON / CSV / ICS）'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _pickAndImportAllSemestersFile,
+                icon: const Icon(Icons.cloud_upload_outlined),
+                label: const Text('导入全部学期备份（JSON）'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExportActionPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('导出', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('JSON 导出包含作息与提醒设置'),
+              subtitle: const Text('CSV 仅包含课程和成绩，不包含设置项。'),
+              value: _includeSettingsInJsonExport,
+              onChanged: (bool value) {
+                setState(() => _includeSettingsInJsonExport = value);
+              },
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => _exportCurrentSemester(json: true),
+                    icon: const Icon(Icons.data_object_outlined),
+                    label: const Text('导出当前学期 JSON'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => _exportCurrentSemester(json: false),
+                    icon: const Icon(Icons.table_rows_outlined),
+                    label: const Text('导出当前学期 CSV'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _exportAllSemestersJson,
+                icon: const Icon(Icons.ios_share_outlined),
+                label: const Text('一键导出全部学期（JSON）'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -151,7 +220,7 @@ class _ImportPageState extends State<ImportPage> {
     final FilePickerResult? picked = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.custom,
-      allowedExtensions: const <String>['json', 'csv'],
+      allowedExtensions: const <String>['json', 'csv', 'ics'],
     );
     if (picked == null ||
         picked.files.isEmpty ||
@@ -168,7 +237,7 @@ class _ImportPageState extends State<ImportPage> {
               replaceExisting: _replaceExisting,
               applySettings: _applySettingsOnImport,
             );
-        _showMessage('当前学期导入完成：${result.courses} 门课程，${result.grades} 条成绩。');
+        _showMessage('导入完成：${result.courses} 门课程，${result.grades} 条成绩。');
       });
     } catch (error) {
       _showMessage('导入失败：${_friendlyError(error)}');
@@ -198,8 +267,10 @@ class _ImportPageState extends State<ImportPage> {
               applySettings: _applySettingsOnImport,
             );
         _showMessage(
-          '全学期导入完成：${result.semesters} 个学期，'
-          '${result.courses} 门课程，${result.grades} 条成绩。',
+          '全学期导入完成：'
+          '${result.semesters} 个学期，'
+          '${result.courses} 门课程，'
+          '${result.grades} 条成绩。',
         );
       });
     } catch (error) {
@@ -215,7 +286,10 @@ class _ImportPageState extends State<ImportPage> {
                 includeSettings: _includeSettingsInJsonExport,
               )
             : await widget.appState.exportCsv();
-        await _shareOrShowPath(file, fallbackPrefix: '导出成功');
+        await _shareOrShowPath(
+          file,
+          fallbackPrefix: json ? '已导出当前学期 JSON' : '已导出当前学期 CSV',
+        );
       });
     } catch (error) {
       _showMessage('导出失败：${_friendlyError(error)}');
@@ -228,7 +302,7 @@ class _ImportPageState extends State<ImportPage> {
         final File file = await widget.appState.exportAllSemestersJson(
           includeSettings: _includeSettingsInJsonExport,
         );
-        await _shareOrShowPath(file, fallbackPrefix: '全学期导出成功');
+        await _shareOrShowPath(file, fallbackPrefix: '已导出全部学期 JSON');
       });
     } catch (error) {
       _showMessage('导出失败：${_friendlyError(error)}');
@@ -241,7 +315,7 @@ class _ImportPageState extends State<ImportPage> {
   }) async {
     try {
       await SharePlus.instance.share(
-        ShareParams(files: <XFile>[XFile(file.path)], text: '课程表备份文件'),
+        ShareParams(files: <XFile>[XFile(file.path)], text: '课表备份文件'),
       );
     } catch (_) {
       _showMessage('$fallbackPrefix：${file.path}');
@@ -305,103 +379,5 @@ class _ImportPageState extends State<ImportPage> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
-  }
-}
-
-class _ImportAction {
-  const _ImportAction({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-  final VoidCallback onTap;
-}
-
-class _ActionGrid extends StatelessWidget {
-  const _ActionGrid({required this.actions});
-
-  final List<_ImportAction> actions;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double width = constraints.maxWidth;
-        final int columns = width >= 900
-            ? 3
-            : width >= 620
-            ? 2
-            : 1;
-        final double itemWidth = (width - (columns - 1) * 12) / columns;
-
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: actions
-              .map(
-                (_ImportAction action) => SizedBox(
-                  width: itemWidth,
-                  child: _ActionCard(action: action),
-                ),
-              )
-              .toList(),
-        );
-      },
-    );
-  }
-}
-
-class _ActionCard extends StatelessWidget {
-  const _ActionCard({required this.action});
-
-  final _ImportAction action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 164,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.58),
-        border: Border.all(
-          color: Theme.of(
-            context,
-          ).colorScheme.outlineVariant.withValues(alpha: 0.45),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(action.icon),
-          const SizedBox(height: 8),
-          Text(
-            action.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: Text(
-              action.description,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.tonal(
-              onPressed: action.onTap,
-              child: const Text('执行'),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

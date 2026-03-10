@@ -303,6 +303,7 @@ class AppSettings {
     required this.reminderMinutesBefore,
     required this.termStartMonday,
     required this.periodStartTimes,
+    required this.periodEndTimes,
     required this.dayStartTime,
     required this.dayEndTime,
     required this.periodDurationMinutes,
@@ -311,12 +312,14 @@ class AppSettings {
     required this.showWeekSummaryInWidget,
     required this.windowsDesktopPinned,
     required this.windowsAutoStart,
+    required this.windowsAutoStartMiniMode,
   });
 
   final ThemeModeSetting themeModeSetting;
   final int reminderMinutesBefore;
   final DateTime termStartMonday;
   final List<String> periodStartTimes;
+  final List<String> periodEndTimes;
   final String dayStartTime;
   final String dayEndTime;
   final int periodDurationMinutes;
@@ -325,21 +328,29 @@ class AppSettings {
   final bool showWeekSummaryInWidget;
   final bool windowsDesktopPinned;
   final bool windowsAutoStart;
+  final bool windowsAutoStartMiniMode;
 
   static AppSettings defaults() {
     const String startTime = '08:00';
     const String endTime = '22:00';
     const int periodMinutes = 50;
     const int maxPeriods = 12;
+    final List<String> starts = buildPeriodStartTimes(
+      dayStartTime: startTime,
+      periodDurationMinutes: periodMinutes,
+      maxPeriodsPerDay: maxPeriods,
+    );
+    final List<String> ends = buildPeriodEndTimes(
+      periodStartTimes: starts,
+      periodDurationMinutes: periodMinutes,
+      dayEndTime: endTime,
+    );
     return AppSettings(
       themeModeSetting: ThemeModeSetting.system,
       reminderMinutesBefore: 15,
       termStartMonday: mondayOf(DateTime.now()),
-      periodStartTimes: buildPeriodStartTimes(
-        dayStartTime: startTime,
-        periodDurationMinutes: periodMinutes,
-        maxPeriodsPerDay: maxPeriods,
-      ),
+      periodStartTimes: starts,
+      periodEndTimes: ends,
       dayStartTime: startTime,
       dayEndTime: endTime,
       periodDurationMinutes: periodMinutes,
@@ -348,6 +359,7 @@ class AppSettings {
       showWeekSummaryInWidget: true,
       windowsDesktopPinned: false,
       windowsAutoStart: false,
+      windowsAutoStartMiniMode: false,
     );
   }
 
@@ -356,6 +368,7 @@ class AppSettings {
     int? reminderMinutesBefore,
     DateTime? termStartMonday,
     List<String>? periodStartTimes,
+    List<String>? periodEndTimes,
     String? dayStartTime,
     String? dayEndTime,
     int? periodDurationMinutes,
@@ -364,6 +377,7 @@ class AppSettings {
     bool? showWeekSummaryInWidget,
     bool? windowsDesktopPinned,
     bool? windowsAutoStart,
+    bool? windowsAutoStartMiniMode,
   }) {
     return AppSettings(
       themeModeSetting: themeModeSetting ?? this.themeModeSetting,
@@ -371,6 +385,7 @@ class AppSettings {
           reminderMinutesBefore ?? this.reminderMinutesBefore,
       termStartMonday: termStartMonday ?? this.termStartMonday,
       periodStartTimes: periodStartTimes ?? this.periodStartTimes,
+      periodEndTimes: periodEndTimes ?? this.periodEndTimes,
       dayStartTime: dayStartTime ?? this.dayStartTime,
       dayEndTime: dayEndTime ?? this.dayEndTime,
       periodDurationMinutes:
@@ -381,6 +396,8 @@ class AppSettings {
           showWeekSummaryInWidget ?? this.showWeekSummaryInWidget,
       windowsDesktopPinned: windowsDesktopPinned ?? this.windowsDesktopPinned,
       windowsAutoStart: windowsAutoStart ?? this.windowsAutoStart,
+      windowsAutoStartMiniMode:
+          windowsAutoStartMiniMode ?? this.windowsAutoStartMiniMode,
     );
   }
 
@@ -389,6 +406,7 @@ class AppSettings {
     'reminderMinutesBefore': reminderMinutesBefore,
     'termStartMonday': termStartMonday.toIso8601String(),
     'periodStartTimes': periodStartTimes,
+    'periodEndTimes': periodEndTimes,
     'dayStartTime': dayStartTime,
     'dayEndTime': dayEndTime,
     'periodDurationMinutes': periodDurationMinutes,
@@ -397,11 +415,14 @@ class AppSettings {
     'showWeekSummaryInWidget': showWeekSummaryInWidget,
     'windowsDesktopPinned': windowsDesktopPinned,
     'windowsAutoStart': windowsAutoStart,
+    'windowsAutoStartMiniMode': windowsAutoStartMiniMode,
   };
 
   factory AppSettings.fromJson(Map<String, dynamic> json) {
     final List<dynamic> periodList =
         (json['periodStartTimes'] as List<dynamic>?) ?? <dynamic>[];
+    final List<dynamic> periodEndList =
+        (json['periodEndTimes'] as List<dynamic>?) ?? <dynamic>[];
     final String parsedStartTime = normalizeTimeText(
       json['dayStartTime'] as String?,
       fallback: defaults().dayStartTime,
@@ -428,6 +449,30 @@ class AppSettings {
         .map((String e) => normalizeTimeText(e, fallback: ''))
         .where((String e) => e.isNotEmpty)
         .toList();
+    final int safeMaxPeriods = parsedMaxPeriods.clamp(1, 24);
+    final List<String> normalizedStarts = _normalizeTimeList(
+      source: storedStarts,
+      fallback: generatedStarts,
+      count: safeMaxPeriods,
+      fallbackValue: '08:00',
+    );
+
+    final List<String> generatedEnds = buildPeriodEndTimes(
+      periodStartTimes: normalizedStarts,
+      periodDurationMinutes: parsedDuration,
+      dayEndTime: parsedEndTime,
+    );
+    final List<String> storedEnds = periodEndList
+        .whereType<String>()
+        .map((String e) => normalizeTimeText(e, fallback: ''))
+        .where((String e) => e.isNotEmpty)
+        .toList();
+    final List<String> normalizedEnds = _normalizeEndTimeList(
+      source: storedEnds,
+      fallback: generatedEnds,
+      startTimes: normalizedStarts,
+      periodDurationMinutes: parsedDuration.clamp(30, 180),
+    );
 
     return AppSettings(
       themeModeSetting: ThemeModeSettingCodec.fromJson(
@@ -438,17 +483,18 @@ class AppSettings {
       termStartMonday:
           DateTime.tryParse(json['termStartMonday'] as String? ?? '') ??
           mondayOf(DateTime.now()),
-      periodStartTimes: storedStarts.length >= 2
-          ? storedStarts
-          : generatedStarts,
+      periodStartTimes: normalizedStarts,
+      periodEndTimes: normalizedEnds,
       dayStartTime: parsedStartTime,
       dayEndTime: parsedEndTime,
       periodDurationMinutes: parsedDuration.clamp(30, 180),
-      maxPeriodsPerDay: parsedMaxPeriods.clamp(1, 24),
+      maxPeriodsPerDay: safeMaxPeriods,
       frostedCards: json['frostedCards'] as bool? ?? true,
       showWeekSummaryInWidget: json['showWeekSummaryInWidget'] as bool? ?? true,
       windowsDesktopPinned: json['windowsDesktopPinned'] as bool? ?? false,
       windowsAutoStart: json['windowsAutoStart'] as bool? ?? false,
+      windowsAutoStartMiniMode:
+          json['windowsAutoStartMiniMode'] as bool? ?? false,
     );
   }
 }
@@ -598,11 +644,113 @@ List<String> buildPeriodStartTimes({
 
   return List<String>.generate(maxPeriods, (int index) {
     final int total = startMinutes + index * duration;
-    final int hour = (total ~/ 60) % 24;
-    final int minute = total % 60;
-    return '${hour.toString().padLeft(2, '0')}:'
-        '${minute.toString().padLeft(2, '0')}';
+    return _minutesToTimeText(total);
   });
+}
+
+List<String> buildPeriodEndTimes({
+  required List<String> periodStartTimes,
+  required int periodDurationMinutes,
+  required String dayEndTime,
+}) {
+  final int duration = periodDurationMinutes.clamp(30, 180);
+  final int? dayEnd = _timeTextToMinutes(
+    normalizeTimeText(dayEndTime, fallback: '22:00'),
+  );
+  final List<String> result = <String>[];
+  for (int i = 0; i < periodStartTimes.length; i++) {
+    final int? start = _timeTextToMinutes(periodStartTimes[i]);
+    if (start == null) {
+      result.add('08:50');
+      continue;
+    }
+    final int? nextStart = i + 1 < periodStartTimes.length
+        ? _timeTextToMinutes(periodStartTimes[i + 1])
+        : null;
+    int endMinutes = start + duration;
+    if (nextStart != null) {
+      endMinutes = nextStart;
+    } else if (dayEnd != null && dayEnd > start) {
+      endMinutes = dayEnd;
+    }
+    if (endMinutes <= start) {
+      endMinutes = start + duration;
+    }
+    result.add(_minutesToTimeText(endMinutes));
+  }
+  return result;
+}
+
+int? periodStartMinutesAt(AppSettings settings, int period) {
+  if (period <= 0) {
+    return null;
+  }
+  if (period - 1 < settings.periodStartTimes.length) {
+    final int? fromSetting = _timeTextToMinutes(
+      settings.periodStartTimes[period - 1],
+    );
+    if (fromSetting != null) {
+      return fromSetting;
+    }
+  }
+  final int? dayStart = _timeTextToMinutes(settings.dayStartTime);
+  if (dayStart == null) {
+    return null;
+  }
+  return dayStart + (period - 1) * settings.periodDurationMinutes;
+}
+
+int? periodEndMinutesAt(AppSettings settings, int period) {
+  if (period <= 0) {
+    return null;
+  }
+
+  final int? periodStart = periodStartMinutesAt(settings, period);
+  if (period - 1 < settings.periodEndTimes.length) {
+    final int? configured = _timeTextToMinutes(
+      settings.periodEndTimes[period - 1],
+    );
+    if (configured != null) {
+      if (periodStart == null || configured > periodStart) {
+        return configured;
+      }
+    }
+  }
+
+  final int? nextStart = periodStartMinutesAt(settings, period + 1);
+  if (nextStart != null) {
+    return nextStart;
+  }
+  if (periodStart == null) {
+    return null;
+  }
+  return periodStart + settings.periodDurationMinutes;
+}
+
+DateTime? sessionStartAt({
+  required DateTime date,
+  required CourseSession session,
+  required AppSettings settings,
+}) {
+  final int? minutes = periodStartMinutesAt(settings, session.startPeriod);
+  if (minutes == null) {
+    return null;
+  }
+  final int safe = minutes.clamp(0, 24 * 60 - 1);
+  return DateTime(date.year, date.month, date.day, safe ~/ 60, safe % 60);
+}
+
+DateTime? sessionEndAt({
+  required DateTime date,
+  required CourseSession session,
+  required AppSettings settings,
+}) {
+  final int? minutes = periodEndMinutesAt(settings, session.endPeriod);
+  if (minutes == null) {
+    return null;
+  }
+  final int safe = minutes.clamp(0, 24 * 60 - 1);
+  return DateTime(date.year, date.month, date.day, safe ~/ 60, safe % 60);
 }
 
 String normalizeTimeText(String? value, {String fallback = '08:00'}) {
@@ -625,6 +773,73 @@ String normalizeTimeText(String? value, {String fallback = '08:00'}) {
 }
 
 int? timeTextToMinutes(String text) => _timeTextToMinutes(text);
+
+List<String> _normalizeTimeList({
+  required List<String> source,
+  required List<String> fallback,
+  required int count,
+  required String fallbackValue,
+}) {
+  final List<String> normalized = <String>[];
+  for (final String value in source) {
+    final String safe = normalizeTimeText(value, fallback: '');
+    if (safe.isEmpty) {
+      continue;
+    }
+    normalized.add(safe);
+    if (normalized.length >= count) {
+      return normalized.take(count).toList();
+    }
+  }
+
+  for (final String value in fallback) {
+    if (normalized.length >= count) {
+      break;
+    }
+    final String safe = normalizeTimeText(value, fallback: '');
+    if (safe.isNotEmpty) {
+      normalized.add(safe);
+    }
+  }
+
+  while (normalized.length < count) {
+    normalized.add(fallbackValue);
+  }
+  return normalized.take(count).toList();
+}
+
+List<String> _normalizeEndTimeList({
+  required List<String> source,
+  required List<String> fallback,
+  required List<String> startTimes,
+  required int periodDurationMinutes,
+}) {
+  final int count = startTimes.length;
+  final List<String> normalized = _normalizeTimeList(
+    source: source,
+    fallback: fallback,
+    count: count,
+    fallbackValue: '08:50',
+  );
+  for (int i = 0; i < count; i++) {
+    final int? start = _timeTextToMinutes(startTimes[i]);
+    final int? end = _timeTextToMinutes(normalized[i]);
+    if (start == null || end == null || end <= start) {
+      normalized[i] = _minutesToTimeText(
+        (start ?? 8 * 60) + periodDurationMinutes.clamp(30, 180),
+      );
+    }
+  }
+  return normalized;
+}
+
+String _minutesToTimeText(int totalMinutes) {
+  final int normalized = totalMinutes.clamp(0, 24 * 60 - 1);
+  final int hour = normalized ~/ 60;
+  final int minute = normalized % 60;
+  return '${hour.toString().padLeft(2, '0')}:'
+      '${minute.toString().padLeft(2, '0')}';
+}
 
 int? _timeTextToMinutes(String text) {
   final List<String> parts = text.split(':');
