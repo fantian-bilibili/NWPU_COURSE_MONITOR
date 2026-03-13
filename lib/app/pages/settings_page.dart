@@ -217,7 +217,7 @@ class _SettingsPageState extends State<SettingsPage> {
               controller: _maxPeriodsController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: '每天理论最大节次',
+                labelText: '每天理论最大节数',
                 hintText: '例如：12',
               ),
               onChanged: (String value) {
@@ -262,48 +262,98 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const SizedBox(height: 10),
             Text(
-              '每节课使用“上课+下课”时间（24 小时制）',
+              '每节课使用“上课 / 下课”时间，点击时间块默认使用滚轮选择。',
               style: Theme.of(context).textTheme.bodyMedium,
             ),
-            const SizedBox(height: 4),
-            Text(
-              '默认点击时间单元格使用滚轮选择，也可点键盘图标手动输入。',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
             const SizedBox(height: 8),
-            for (
-              int i = 0;
-              i < safeMaxPeriods && i < _periodControllers.length;
-              i++
-            ) ...<Widget>[
-              Row(
-                children: <Widget>[
-                  SizedBox(width: 68, child: Text('第${i + 1}节')),
-                  Expanded(
-                    child: _buildTimeField(
-                      controller: _periodControllers[i],
-                      label: '上课',
-                      onWheelTap: () =>
-                          _pickPeriodTimeWithWheel(index: i, isStart: true),
-                      onKeyboardTap: () =>
-                          _pickPeriodTimeWithKeyboard(index: i, isStart: true),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildTimeField(
-                      controller: _periodEndControllers[i],
-                      label: '下课',
-                      onWheelTap: () =>
-                          _pickPeriodTimeWithWheel(index: i, isStart: false),
-                      onKeyboardTap: () =>
-                          _pickPeriodTimeWithKeyboard(index: i, isStart: false),
-                    ),
-                  ),
-                ],
+            FrostedPanel(
+              enabled: settings.frostedCards,
+              padding: EdgeInsets.zero,
+              radius: 22,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                child: Column(
+                  children: <Widget>[
+                    for (
+                      int i = 0;
+                      i < safeMaxPeriods && i < _periodControllers.length;
+                      i++
+                    )
+                      Theme(
+                        data: Theme.of(
+                          context,
+                        ).copyWith(dividerColor: Colors.transparent),
+                        child: ExpansionTile(
+                          key: PageStorageKey<String>('period-tile-$i'),
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            6,
+                            0,
+                            6,
+                            10,
+                          ),
+                          title: Text(
+                            '第${i + 1}节',
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(fontWeight: FontWeight.w800),
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              _formatPeriodRange(i),
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ),
+                          children: <Widget>[
+                            Row(
+                              children: <Widget>[
+                                Expanded(
+                                  child: _buildTimeField(
+                                    controller: _periodControllers[i],
+                                    label: '上课',
+                                    onWheelTap: () => _pickPeriodTimeWithWheel(
+                                      index: i,
+                                      isStart: true,
+                                    ),
+                                    onKeyboardTap: () =>
+                                        _pickPeriodTimeWithKeyboard(
+                                          index: i,
+                                          isStart: true,
+                                        ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: _buildTimeField(
+                                    controller: _periodEndControllers[i],
+                                    label: '下课',
+                                    onWheelTap: () => _pickPeriodTimeWithWheel(
+                                      index: i,
+                                      isStart: false,
+                                    ),
+                                    onKeyboardTap: () =>
+                                        _pickPeriodTimeWithKeyboard(
+                                          index: i,
+                                          isStart: false,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
-            ],
+            ),
+            const SizedBox(height: 4),
             FilledButton.tonalIcon(
               onPressed: () => _saveMaxPeriods(appState),
               icon: const Icon(Icons.schedule_outlined),
@@ -332,24 +382,10 @@ class _SettingsPageState extends State<SettingsPage> {
           children: <Widget>[
             Text('外观与组件', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
-            SegmentedButton<ThemeModeSetting>(
-              segments: const <ButtonSegment<ThemeModeSetting>>[
-                ButtonSegment<ThemeModeSetting>(
-                  value: ThemeModeSetting.system,
-                  label: Text('跟随系统'),
-                ),
-                ButtonSegment<ThemeModeSetting>(
-                  value: ThemeModeSetting.light,
-                  label: Text('浅色'),
-                ),
-                ButtonSegment<ThemeModeSetting>(
-                  value: ThemeModeSetting.dark,
-                  label: Text('深色'),
-                ),
-              ],
-              selected: <ThemeModeSetting>{appState.settings.themeModeSetting},
-              onSelectionChanged: (Set<ThemeModeSetting> value) async {
-                await appState.setThemeMode(value.first);
+            _ThemeModeSelector(
+              value: appState.settings.themeModeSetting,
+              onChanged: (ThemeModeSetting value) async {
+                await appState.setThemeMode(value);
               },
             ),
             const SizedBox(height: 10),
@@ -667,42 +703,77 @@ class _SettingsPageState extends State<SettingsPage> {
     required VoidCallback onWheelTap,
     required VoidCallback onKeyboardTap,
   }) {
-    return InkWell(
-      onTap: onWheelTap,
-      borderRadius: BorderRadius.circular(10),
-      child: InputDecorator(
-        decoration: InputDecoration(
-          isDense: true,
-          labelText: label,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 10,
-            vertical: 10,
+    final ThemeData theme = Theme.of(context);
+    final String value = controller.text.trim().isEmpty
+        ? '--:--'
+        : controller.text.trim();
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onWheelTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          height: 46,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            color:
+                theme.inputDecorationTheme.fillColor ??
+                theme.colorScheme.surface.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: theme.colorScheme.outlineVariant),
           ),
-          suffixIconConstraints: const BoxConstraints(
-            minWidth: 72,
-            minHeight: 36,
-          ),
-          suffixIcon: Row(
-            mainAxisSize: MainAxisSize.min,
+          child: Row(
             children: <Widget>[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
               IconButton(
                 tooltip: '滚轮选择',
                 visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 28,
+                  height: 28,
+                ),
                 onPressed: onWheelTap,
-                icon: const Icon(Icons.access_time_outlined, size: 18),
+                icon: const Icon(Icons.schedule_outlined, size: 16),
               ),
               IconButton(
                 tooltip: '键盘输入',
                 visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints.tightFor(
+                  width: 28,
+                  height: 28,
+                ),
                 onPressed: onKeyboardTap,
-                icon: const Icon(Icons.keyboard_outlined, size: 18),
+                icon: const Icon(Icons.keyboard_outlined, size: 16),
               ),
             ],
           ),
-        ),
-        child: Text(
-          controller.text.trim().isEmpty ? '--:--' : controller.text.trim(),
-          style: Theme.of(context).textTheme.bodyMedium,
         ),
       ),
     );
@@ -766,50 +837,86 @@ class _SettingsPageState extends State<SettingsPage> {
 
     return showModalBottomSheet<String>(
       context: context,
+      backgroundColor: Colors.transparent,
       useSafeArea: true,
       builder: (BuildContext context) {
-        return SizedBox(
-          height: 290,
-          child: Column(
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
-                child: Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: Theme.of(context).textTheme.titleMedium,
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+          child: FrostedPanel(
+            enabled: true,
+            padding: EdgeInsets.zero,
+            radius: 28,
+            child: SizedBox(
+              height: 290,
+              child: Column(
+                children: <Widget>[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 8, 6),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            title,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('取消'),
+                        ),
+                        FilledButton.tonal(
+                          onPressed: () =>
+                              Navigator.of(context).pop(_formatTime(selected)),
+                          child: const Text('确定'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: CupertinoTheme(
+                      data: CupertinoThemeData(
+                        brightness: Theme.of(context).brightness,
+                        textTheme: CupertinoTextThemeData(
+                          dateTimePickerTextStyle: Theme.of(context)
+                              .textTheme
+                              .titleMedium
+                              ?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                        ),
+                      ),
+                      child: CupertinoDatePicker(
+                        backgroundColor: Colors.transparent,
+                        mode: CupertinoDatePickerMode.time,
+                        use24hFormat: true,
+                        initialDateTime: selected,
+                        minuteInterval: 1,
+                        onDateTimeChanged: (DateTime value) {
+                          selected = value;
+                        },
                       ),
                     ),
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('取消'),
-                    ),
-                    FilledButton.tonal(
-                      onPressed: () =>
-                          Navigator.of(context).pop(_formatTime(selected)),
-                      child: const Text('确定'),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              Expanded(
-                child: CupertinoDatePicker(
-                  mode: CupertinoDatePickerMode.time,
-                  use24hFormat: true,
-                  initialDateTime: selected,
-                  minuteInterval: 1,
-                  onDateTimeChanged: (DateTime value) {
-                    selected = value;
-                  },
-                ),
-              ),
-            ],
+            ),
           ),
         );
       },
     );
+  }
+
+  String _formatPeriodRange(int index) {
+    final String start = index < _periodControllers.length
+        ? _periodControllers[index].text.trim()
+        : '';
+    final String end = index < _periodEndControllers.length
+        ? _periodEndControllers[index].text.trim()
+        : '';
+    final String safeStart = start.isEmpty ? '--:--' : start;
+    final String safeEnd = end.isEmpty ? '--:--' : end;
+    return '$safeStart - $safeEnd';
   }
 
   Future<String?> _showKeyboardTimeDialog({
@@ -979,6 +1086,89 @@ class _SettingsPageState extends State<SettingsPage> {
     final DateTime now = DateTime.now();
     final bool autumn = now.month >= 8 || now.month <= 1;
     return '${now.year} ${autumn ? '秋季学期' : '春季学期'}';
+  }
+}
+
+class _ThemeModeSelector extends StatelessWidget {
+  const _ThemeModeSelector({required this.value, required this.onChanged});
+
+  final ThemeModeSetting value;
+  final ValueChanged<ThemeModeSetting> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        for (final (ThemeModeSetting value, String label) item
+            in const <(ThemeModeSetting, String)>[
+              (ThemeModeSetting.system, '跟随系统'),
+              (ThemeModeSetting.light, '浅色'),
+              (ThemeModeSetting.dark, '深色'),
+            ])
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                right: item.$1 == ThemeModeSetting.dark ? 0 : 8,
+              ),
+              child: _ThemeModeOption(
+                label: item.$2,
+                selected: item.$1 == value,
+                onTap: () => onChanged(item.$1),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _ThemeModeOption extends StatelessWidget {
+  const _ThemeModeOption({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(18),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 46,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? scheme.primary.withValues(alpha: 0.12)
+                : scheme.surface.withValues(alpha: 0.72),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: selected ? scheme.primary : scheme.outlineVariant,
+            ),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            softWrap: false,
+            overflow: TextOverflow.fade,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: selected ? scheme.primary : scheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 

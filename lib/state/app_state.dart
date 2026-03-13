@@ -78,16 +78,21 @@ class AppState extends ChangeNotifier {
   List<Course> get allCourses => List<Course>.unmodifiable(_courses);
   List<GradeEntry> get allGrades => List<GradeEntry>.unmodifiable(_grades);
 
+  int get releasedGradeCount =>
+      grades.where((GradeEntry grade) => grade.isReleased).length;
+
   double get earnedCredits {
     return grades
-        .where((GradeEntry grade) => grade.counted)
+        .where((GradeEntry grade) => grade.countsTowardGpa)
         .fold<double>(0, (double sum, GradeEntry grade) => sum + grade.credit);
   }
 
   double get currentGpa {
     double weightedPoints = 0;
     double totalCredits = 0;
-    for (final GradeEntry grade in grades.where((GradeEntry g) => g.counted)) {
+    for (final GradeEntry grade in grades.where(
+      (GradeEntry g) => g.countsTowardGpa,
+    )) {
       final double? gpa = grade.finalGradePoint;
       if (gpa == null || grade.credit <= 0) {
         continue;
@@ -104,7 +109,9 @@ class AppState extends ChangeNotifier {
   double get weightedScore {
     double weightedTotal = 0;
     double totalCredits = 0;
-    for (final GradeEntry grade in grades.where((GradeEntry g) => g.counted)) {
+    for (final GradeEntry grade in grades.where(
+      (GradeEntry g) => g.countsTowardGpa,
+    )) {
       final double? score = grade.score;
       if (score == null || grade.credit <= 0) {
         continue;
@@ -348,8 +355,29 @@ class AppState extends ChangeNotifier {
     required Course course,
     required double? gradePoint,
   }) async {
+    await setCourseGradeResult(
+      course: course,
+      resultType: gradePoint == null ? null : GradeResultType.gpa,
+      gradePoint: gradePoint,
+    );
+  }
+
+  Future<void> setCourseGradeResult({
+    required Course course,
+    required GradeResultType? resultType,
+    double? gradePoint,
+  }) async {
     final GradeEntry? existing = gradeForCourse(course);
-    if (gradePoint == null) {
+    if (resultType == null) {
+      if (existing != null) {
+        await deleteGrade(existing.id);
+      }
+      return;
+    }
+
+    if (resultType == GradeResultType.gpa &&
+        gradePoint == null &&
+        existing?.score == null) {
       if (existing != null) {
         await deleteGrade(existing.id);
       }
@@ -362,9 +390,10 @@ class AppState extends ChangeNotifier {
       semesterId: _currentSemesterId,
       courseName: course.name,
       credit: course.credit,
-      score: existing?.score,
-      gradePoint: gradePoint,
-      counted: true,
+      score: resultType == GradeResultType.gpa ? existing?.score : null,
+      gradePoint: resultType == GradeResultType.gpa ? gradePoint : null,
+      resultType: resultType,
+      counted: existing?.counted ?? true,
     );
     await upsertGrade(entry);
   }
@@ -1052,6 +1081,7 @@ class AppState extends ChangeNotifier {
         '${grade.credit.toStringAsFixed(2)}|'
         '$score|'
         '$gpa|'
+        '${grade.resultType.jsonValue}|'
         '${grade.counted}';
   }
 

@@ -74,6 +74,7 @@ class ImportExportService {
         'courseId',
         'score',
         'gradePoint',
+        'resultType',
         'counted',
       ],
     ];
@@ -124,6 +125,7 @@ class ImportExportService {
         grade.courseId ?? '',
         grade.score ?? '',
         grade.gradePoint ?? '',
+        grade.resultType.jsonValue,
         grade.counted,
       ]);
     }
@@ -284,6 +286,7 @@ class ImportExportService {
             credit: _toDouble(row['credit']) ?? 0,
             score: _toDouble(row['score']),
             gradePoint: _toDouble(row['gradePoint']),
+            resultType: GradeResultTypeCodec.fromJson(row['resultType']),
             counted: (row['counted'] ?? '').toLowerCase() != 'false',
           ),
         );

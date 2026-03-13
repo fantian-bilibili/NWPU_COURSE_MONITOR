@@ -187,6 +187,34 @@ class Course {
   }
 }
 
+enum GradeResultType { gpa, pass, noPass }
+
+extension GradeResultTypeCodec on GradeResultType {
+  String get jsonValue => switch (this) {
+    GradeResultType.gpa => 'gpa',
+    GradeResultType.pass => 'pass',
+    GradeResultType.noPass => 'no_pass',
+  };
+
+  String get shortLabel => switch (this) {
+    GradeResultType.gpa => '绩点',
+    GradeResultType.pass => 'P',
+    GradeResultType.noPass => 'NP',
+  };
+
+  String get displayLabel => switch (this) {
+    GradeResultType.gpa => '绩点课',
+    GradeResultType.pass => '通过',
+    GradeResultType.noPass => '未通过',
+  };
+
+  static GradeResultType fromJson(String? value) => switch (value) {
+    'pass' => GradeResultType.pass,
+    'no_pass' || 'np' => GradeResultType.noPass,
+    _ => GradeResultType.gpa,
+  };
+}
+
 class GradeEntry {
   GradeEntry({
     String? id,
@@ -196,6 +224,7 @@ class GradeEntry {
     required this.credit,
     this.score,
     this.gradePoint,
+    this.resultType = GradeResultType.gpa,
     this.counted = true,
   }) : id = id ?? _uuid.v4();
 
@@ -206,10 +235,25 @@ class GradeEntry {
   final double credit;
   final double? score;
   final double? gradePoint;
+  final GradeResultType resultType;
   final bool counted;
 
-  double? get finalGradePoint =>
-      gradePoint ?? (score == null ? null : scoreToGpa(score!));
+  bool get isReleased => switch (resultType) {
+    GradeResultType.gpa => score != null || gradePoint != null,
+    GradeResultType.pass || GradeResultType.noPass => true,
+  };
+
+  bool get countsTowardGpa => counted && resultType == GradeResultType.gpa;
+
+  double? get finalGradePoint => resultType == GradeResultType.gpa
+      ? gradePoint ?? (score == null ? null : scoreToGpa(score!))
+      : null;
+
+  String get resultSummary => switch (resultType) {
+    GradeResultType.gpa => finalGradePoint?.toStringAsFixed(2) ?? '未出分',
+    GradeResultType.pass => 'P',
+    GradeResultType.noPass => 'NP',
+  };
 
   GradeEntry copyWith({
     String? id,
@@ -219,6 +263,7 @@ class GradeEntry {
     double? credit,
     double? score,
     double? gradePoint,
+    GradeResultType? resultType,
     bool? counted,
   }) {
     return GradeEntry(
@@ -229,12 +274,14 @@ class GradeEntry {
       credit: credit ?? this.credit,
       score: score ?? this.score,
       gradePoint: gradePoint ?? this.gradePoint,
+      resultType: resultType ?? this.resultType,
       counted: counted ?? this.counted,
     );
   }
 
   String signature() {
-    return '${semesterId.trim()}|${courseName.trim()}|$credit|${score ?? ''}|${gradePoint ?? ''}|$counted';
+    return '${semesterId.trim()}|${courseName.trim()}|$credit|${score ?? ''}|'
+        '${gradePoint ?? ''}|${resultType.jsonValue}|$counted';
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -245,6 +292,7 @@ class GradeEntry {
     'credit': credit,
     'score': score,
     'gradePoint': gradePoint,
+    'resultType': resultType.jsonValue,
     'counted': counted,
   };
 
@@ -257,6 +305,7 @@ class GradeEntry {
       credit: (json['credit'] as num?)?.toDouble() ?? 0,
       score: (json['score'] as num?)?.toDouble(),
       gradePoint: (json['gradePoint'] as num?)?.toDouble(),
+      resultType: GradeResultTypeCodec.fromJson(json['resultType'] as String?),
       counted: json['counted'] as bool? ?? true,
     );
   }

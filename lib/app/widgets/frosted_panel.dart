@@ -10,7 +10,7 @@ class FrostedPanel extends StatelessWidget {
     required this.child,
     this.tint,
     this.padding = const EdgeInsets.symmetric(vertical: 6),
-    this.radius = 18,
+    this.radius = 20,
   });
 
   final bool enabled;
@@ -21,64 +21,51 @@ class FrostedPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-    final Color panelColor =
-        tint ?? (isDark ? const Color(0xB220242B) : const Color(0xCCFFFFFF));
-    final bool useRealtimeBlur = _shouldUseRealtimeBlur();
+    final ThemeData theme = Theme.of(context);
+    final bool isDark = theme.brightness == Brightness.dark;
+    final bool useRealtimeBlur = enabled && _shouldUseRealtimeBlur();
+    final Color baseColor =
+        tint ?? (isDark ? const Color(0xC0192028) : const Color(0xD9FFFFFF));
+    final BorderRadius borderRadius = BorderRadius.circular(radius);
+    final BoxDecoration decoration = BoxDecoration(
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: isDark
+            ? <Color>[
+                baseColor.withValues(alpha: 0.92),
+                const Color(0xB3141A21),
+              ]
+            : <Color>[baseColor, const Color(0xCCF6FAFD)],
+      ),
+      borderRadius: borderRadius,
+      border: Border.all(
+        color: isDark ? const Color(0x26FFFFFF) : const Color(0x140E2334),
+      ),
+      boxShadow: <BoxShadow>[
+        BoxShadow(
+          color: isDark ? const Color(0x26000000) : const Color(0x120E2235),
+          blurRadius: 26,
+          offset: const Offset(0, 12),
+        ),
+      ],
+    );
 
-    if (!enabled) {
-      return Padding(
-        padding: padding,
-        child: Card(child: child),
-      );
-    }
+    final Widget decoratedChild = DecoratedBox(
+      decoration: decoration,
+      child: child,
+    );
 
     return Padding(
       padding: padding,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(radius),
+        borderRadius: borderRadius,
         child: useRealtimeBlur
             ? BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: panelColor,
-                    borderRadius: BorderRadius.circular(radius),
-                    border: Border.all(
-                      color: isDark
-                          ? const Color(0x33FFFFFF)
-                          : const Color(0x1F111827),
-                    ),
-                    boxShadow: const <BoxShadow>[
-                      BoxShadow(
-                        color: Color(0x14000000),
-                        blurRadius: 10,
-                        offset: Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: child,
-                ),
+                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+                child: decoratedChild,
               )
-            : DecoratedBox(
-                decoration: BoxDecoration(
-                  color: panelColor,
-                  borderRadius: BorderRadius.circular(radius),
-                  border: Border.all(
-                    color: isDark
-                        ? const Color(0x33FFFFFF)
-                        : const Color(0x1F111827),
-                  ),
-                  boxShadow: const <BoxShadow>[
-                    BoxShadow(
-                      color: Color(0x12000000),
-                      blurRadius: 8,
-                      offset: Offset(0, 3),
-                    ),
-                  ],
-                ),
-                child: child,
-              ),
+            : decoratedChild,
       ),
     );
   }
@@ -97,32 +84,80 @@ class FrostedPanel extends StatelessWidget {
 }
 
 class MetricTile extends StatelessWidget {
-  const MetricTile({super.key, required this.label, required this.value});
+  const MetricTile({
+    super.key,
+    required this.label,
+    required this.value,
+    this.caption,
+    this.icon,
+    this.accent,
+  });
 
   final String label;
   final String value;
+  final String? caption;
+  final IconData? icon;
+  final Color? accent;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 156, maxWidth: 190),
-      child: FrostedPanel(
-        enabled: true,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Text(label, style: Theme.of(context).textTheme.bodyMedium),
-              const SizedBox(height: 8),
-              Text(
-                value,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w800,
+    final ThemeData theme = Theme.of(context);
+    final Color tone = accent ?? theme.colorScheme.primary;
+
+    return FrostedPanel(
+      enabled: true,
+      padding: EdgeInsets.zero,
+      radius: 22,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                if (icon != null)
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: tone.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: tone, size: 16),
+                  ),
+                if (icon != null) const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: tone,
+              ),
+            ),
+            if (caption != null && caption!.trim().isNotEmpty) ...<Widget>[
+              const SizedBox(height: 4),
+              Text(
+                caption!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall,
               ),
             ],
-          ),
+          ],
         ),
       ),
     );

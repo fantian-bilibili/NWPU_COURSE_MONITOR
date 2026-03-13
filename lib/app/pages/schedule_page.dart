@@ -10,6 +10,8 @@ import '../widgets/frosted_panel.dart';
 
 enum _ScheduleMode { dayList, weekList, weekGrid }
 
+enum _CourseGradeMode { pending, gpa, pass, noPass }
+
 class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key, required this.appState});
 
@@ -98,7 +100,10 @@ class _SchedulePageState extends State<SchedulePage> {
     final DateTime titleDate = _mode == _ScheduleMode.dayList
         ? selectedDate
         : weekStart;
+    final bool compact = MediaQuery.sizeOf(context).width < 430;
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Expanded(
           child: Column(
@@ -109,16 +114,21 @@ class _SchedulePageState extends State<SchedulePage> {
                   Text(
                     '课程总览',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontSize: compact ? 24 : null,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: compact ? 8 : 10),
                   Expanded(
                     child: Text(
                       state.currentSemester.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
+                      style: compact
+                          ? Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            )
+                          : Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
                 ],
@@ -128,11 +138,21 @@ class _SchedulePageState extends State<SchedulePage> {
             ],
           ),
         ),
-        FilledButton.icon(
-          onPressed: () => _createOrEditCourse(context, state),
-          icon: const Icon(Icons.add),
-          label: const Text('新增课程'),
-        ),
+        const SizedBox(width: 12),
+        compact
+            ? FilledButton(
+                onPressed: () => _createOrEditCourse(context, state),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(46, 46),
+                  padding: EdgeInsets.zero,
+                ),
+                child: const Icon(Icons.add),
+              )
+            : FilledButton.icon(
+                onPressed: () => _createOrEditCourse(context, state),
+                icon: const Icon(Icons.add),
+                label: const Text('新增课程'),
+              ),
       ],
     );
   }
@@ -476,6 +496,7 @@ class _CourseExpansionCard extends StatefulWidget {
 class _CourseExpansionCardState extends State<_CourseExpansionCard> {
   bool _expanded = false;
   late final TextEditingController _gpaController;
+  _CourseGradeMode _gradeMode = _CourseGradeMode.pending;
 
   @override
   void initState() {
@@ -492,7 +513,17 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
 
   void _refreshGradeText() {
     final GradeEntry? grade = widget.appState.gradeForCourse(widget.course);
-    _gpaController.text = grade?.finalGradePoint?.toStringAsFixed(2) ?? '';
+    _gradeMode = switch (grade?.resultType) {
+      GradeResultType.gpa => _CourseGradeMode.gpa,
+      GradeResultType.pass => _CourseGradeMode.pass,
+      GradeResultType.noPass => _CourseGradeMode.noPass,
+      null => _CourseGradeMode.pending,
+    };
+    _gpaController.text =
+        grade?.resultType == GradeResultType.gpa &&
+            grade?.finalGradePoint != null
+        ? grade!.finalGradePoint!.toStringAsFixed(2)
+        : '';
   }
 
   @override
@@ -564,24 +595,53 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
             value: widget.course.credit.toStringAsFixed(1),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _gpaController,
-                  decoration: const InputDecoration(
-                    labelText: '绩点（留空表示未出分）',
-                    isDense: true,
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+          Text('成绩录入', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _CourseGradeModeSelector(
+            mode: _gradeMode,
+            onChanged: (_CourseGradeMode value) {
+              setState(() {
+                _gradeMode = value;
+                if (value != _CourseGradeMode.gpa) {
+                  _gpaController.clear();
+                }
+              });
+            },
+          ),
+          if (_gradeMode == _CourseGradeMode.gpa) ...<Widget>[
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _gpaController,
+                    decoration: const InputDecoration(
+                      labelText: '绩点',
+                      hintText: '留空表示删除成绩',
+                      isDense: true,
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  onPressed: _saveGrade,
+                  child: const Text('保存'),
+                ),
+              ],
+            ),
+          ] else ...<Widget>[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonal(
+                onPressed: _saveGrade,
+                child: const Text('保存'),
               ),
-              const SizedBox(width: 8),
-              FilledButton.tonal(onPressed: _saveGpa, child: const Text('保存')),
-            ],
-          ),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: <Widget>[
@@ -624,18 +684,23 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
     return course.sessions.first;
   }
 
-  Future<void> _saveGpa() async {
+  Future<void> _saveGrade() async {
     final String text = _gpaController.text.trim();
-    final double? gpa = text.isEmpty ? null : double.tryParse(text);
-    if (text.isNotEmpty && gpa == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('绩点格式错误')));
-      return;
+    double? gpa;
+    if (_gradeMode == _CourseGradeMode.gpa) {
+      gpa = text.isEmpty ? null : double.tryParse(text);
+      if (text.isNotEmpty && gpa == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('绩点格式错误')));
+        return;
+      }
     }
+
     await widget.appState.runWithBusy(() {
-      return widget.appState.setCourseGradePoint(
+      return widget.appState.setCourseGradeResult(
         course: widget.course,
+        resultType: _gradeMode.toGradeResultType(),
         gradePoint: gpa,
       );
     });
@@ -644,6 +709,97 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
   Future<void> _delete() async {
     await widget.appState.runWithBusy(
       () => widget.appState.deleteCourse(widget.course.id),
+    );
+  }
+}
+
+extension on _CourseGradeMode {
+  GradeResultType? toGradeResultType() => switch (this) {
+    _CourseGradeMode.pending => null,
+    _CourseGradeMode.gpa => GradeResultType.gpa,
+    _CourseGradeMode.pass => GradeResultType.pass,
+    _CourseGradeMode.noPass => GradeResultType.noPass,
+  };
+}
+
+class _CourseGradeModeSelector extends StatelessWidget {
+  const _CourseGradeModeSelector({required this.mode, required this.onChanged});
+
+  final _CourseGradeMode mode;
+  final ValueChanged<_CourseGradeMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        for (final (_CourseGradeMode value, String label) option
+            in const <(_CourseGradeMode, String)>[
+              (_CourseGradeMode.pending, '未出分'),
+              (_CourseGradeMode.gpa, '绩点'),
+              (_CourseGradeMode.pass, 'P'),
+              (_CourseGradeMode.noPass, 'NP'),
+            ])
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                right: option.$1 == _CourseGradeMode.noPass ? 0 : 6,
+              ),
+              child: _CourseGradeModeButton(
+                label: option.$2,
+                selected: option.$1 == mode,
+                onTap: () => onChanged(option.$1),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _CourseGradeModeButton extends StatelessWidget {
+  const _CourseGradeModeButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? scheme.primary.withValues(alpha: 0.12)
+                : scheme.surface.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? scheme.primary : scheme.outlineVariant,
+            ),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: selected ? scheme.primary : scheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

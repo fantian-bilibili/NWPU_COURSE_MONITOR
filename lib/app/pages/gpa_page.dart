@@ -12,11 +12,10 @@ class GpaPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
     final NumberFormat formatter = NumberFormat('0.00');
     final List<GradeEntry> graded =
-        appState.grades
-            .where((GradeEntry grade) => grade.finalGradePoint != null)
-            .toList()
+        appState.grades.where((GradeEntry grade) => grade.isReleased).toList()
           ..sort(
             (GradeEntry a, GradeEntry b) =>
                 a.courseName.compareTo(b.courseName),
@@ -27,70 +26,92 @@ class GpaPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(
-            '绩点概览',
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '当前学期：${appState.currentSemester.name}',
-            style: Theme.of(context).textTheme.bodyMedium,
+          FrostedPanel(
+            enabled: appState.settings.frostedCards,
+            padding: EdgeInsets.zero,
+            radius: 28,
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          '绩点总览',
+                          style: theme.textTheme.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          appState.currentSemester.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _SummaryCountCard(count: graded.length),
+                ],
+              ),
+            ),
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
+          Row(
             children: <Widget>[
-              MetricTile(
-                label: '当前学分绩',
-                value: formatter.format(appState.currentGpa),
+              Expanded(
+                child: MetricTile(
+                  label: '当前学分绩',
+                  value: formatter.format(appState.currentGpa),
+                  icon: Icons.timeline_rounded,
+                  accent: theme.colorScheme.primary,
+                ),
               ),
-              MetricTile(label: '已出分课程', value: '${graded.length}'),
-              MetricTile(
-                label: '已计入学分',
-                value: formatter.format(appState.earnedCredits),
+              const SizedBox(width: 10),
+              Expanded(
+                child: MetricTile(
+                  label: '已计入学分',
+                  value: formatter.format(appState.earnedCredits),
+                  icon: Icons.school_outlined,
+                  accent: const Color(0xFF7D6AAF),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 12),
-          Text(
-            '已出分课程',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            '成绩录入入口在课程详情里：展开某门课程后可直接填写绩点。',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
           Expanded(
-            child: graded.isEmpty
-                ? const Center(child: Text('当前还没有已出分课程。'))
-                : ListView.builder(
-                    itemCount: graded.length,
-                    itemBuilder: (BuildContext context, int index) {
-                      final GradeEntry grade = graded[index];
-                      final Course? course = _findCourseByGrade(grade);
-                      final String code = (course?.code ?? '').trim();
-                      final String gpa = (grade.finalGradePoint ?? 0)
-                          .toStringAsFixed(2);
-
-                      return FrostedPanel(
-                        enabled: appState.settings.frostedCards,
-                        child: ListTile(
-                          title: Text(grade.courseName),
-                          subtitle: Text(
-                            '学分 ${grade.credit.toStringAsFixed(1)}  ·  '
-                            '绩点 $gpa  ·  课程代码 ${code.isEmpty ? '-' : code}',
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+            child: FrostedPanel(
+              enabled: appState.settings.frostedCards,
+              padding: EdgeInsets.zero,
+              radius: 28,
+              child: graded.isEmpty
+                  ? _EmptyGradesState(theme: theme)
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                      itemCount: graded.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (BuildContext context, int index) {
+                        final GradeEntry grade = graded[index];
+                        final Course? course = _findCourseByGrade(grade);
+                        final String code = (course?.code ?? '').trim();
+                        return _GradeCard(
+                          courseName: grade.courseName,
+                          credit: grade.credit,
+                          resultLabel: grade.resultSummary,
+                          resultCaption: grade.resultType == GradeResultType.gpa
+                              ? '绩点'
+                              : '结果',
+                          code: code,
+                          accent: course?.color ?? theme.colorScheme.primary,
+                        );
+                      },
+                    ),
+            ),
           ),
         ],
       ),
@@ -111,5 +132,209 @@ class GpaPage extends StatelessWidget {
       }
     }
     return null;
+  }
+}
+
+class _SummaryCountCard extends StatelessWidget {
+  const _SummaryCountCard({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Container(
+      width: 112,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              '已出分课程',
+              textAlign: TextAlign.right,
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: Center(
+                  child: Text(
+                    '$count',
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+              Text(
+                '门',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.primary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GradeCard extends StatelessWidget {
+  const _GradeCard({
+    required this.courseName,
+    required this.credit,
+    required this.resultLabel,
+    required this.resultCaption,
+    required this.code,
+    required this.accent,
+  });
+
+  final String courseName;
+  final double credit;
+  final String resultLabel;
+  final String resultCaption;
+  final String code;
+  final Color accent;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final String safeCode = code.isEmpty ? '未填写' : code;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.52 : 0.82,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Container(
+            width: 6,
+            height: 56,
+            margin: const EdgeInsets.only(top: 2),
+            decoration: BoxDecoration(
+              color: accent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  courseName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: <Widget>[
+                    _InfoChip(label: '学分 ${credit.toStringAsFixed(1)}'),
+                    _InfoChip(label: '课程代码 $safeCode'),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: <Widget>[
+              Text(resultCaption, style: theme.textTheme.bodySmall),
+              const SizedBox(height: 4),
+              Text(
+                resultLabel,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  color: accent,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(label, style: theme.textTheme.bodySmall),
+    );
+  }
+}
+
+class _EmptyGradesState extends StatelessWidget {
+  const _EmptyGradesState({required this.theme});
+
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Icon(
+                Icons.assignment_turned_in_outlined,
+                size: 28,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '当前还没有已出分课程',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
