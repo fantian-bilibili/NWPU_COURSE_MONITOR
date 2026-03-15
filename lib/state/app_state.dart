@@ -69,6 +69,16 @@ class AppState extends ChangeNotifier {
     _courses.where((Course c) => c.semesterId == _currentSemesterId).toList(),
   );
 
+  List<Course> get scheduledCourses => List<Course>.unmodifiable(
+    courses
+        .where((Course course) => !course.isOnline && course.hasSchedule)
+        .toList(),
+  );
+
+  List<Course> get onlineCourses => List<Course>.unmodifiable(
+    courses.where((Course course) => course.isOnline).toList(),
+  );
+
   List<GradeEntry> get grades => List<GradeEntry>.unmodifiable(
     _grades
         .where((GradeEntry g) => g.semesterId == _currentSemesterId)
@@ -263,9 +273,36 @@ class AppState extends ChangeNotifier {
     _emitStatus('学期信息已更新。');
   }
 
+  Future<void> deleteSemester(String semesterId) async {
+    if (_semesters.length <= 1) {
+      throw Exception('至少需要保留一个学期。');
+    }
+    final int index = _semesters.indexWhere(
+      (SemesterInfo semester) => semester.id == semesterId,
+    );
+    if (index < 0) {
+      return;
+    }
+
+    final SemesterInfo deleting = _semesters[index];
+    _semesters.removeAt(index);
+    _courses.removeWhere((Course course) => course.semesterId == semesterId);
+    _grades.removeWhere((GradeEntry grade) => grade.semesterId == semesterId);
+
+    if (_currentSemesterId == semesterId) {
+      _currentSemesterId = _semesters.first.id;
+      _settings = _settings.copyWith(termStartMonday: currentTermStartMonday);
+      await _storageService.saveSettings(_settings);
+    }
+
+    await _persistData();
+    await _persistSemesterState();
+    _emitStatus('已删除学期：${deleting.name}');
+  }
+
   List<Course> coursesForDate(DateTime date) {
     final DateTime day = DateTime(date.year, date.month, date.day);
-    final List<Course> result = courses
+    final List<Course> result = scheduledCourses
         .where(
           (Course course) => course.sessions.any(
             (CourseSession session) =>
@@ -396,6 +433,75 @@ class AppState extends ChangeNotifier {
       counted: existing?.counted ?? true,
     );
     await upsertGrade(entry);
+  }
+
+  Future<ExcelGradeParseResult> previewGradeExcel(String path) {
+    return _importExportService.parseGradeExcel(path);
+  }
+
+  Future<ExcelGradeImportResult> importGradesFromExcel({
+    required List<ExcelGradeRow> rows,
+    required Map<String, String> semesterMapping,
+  }) async {
+    int appliedCount = 0;
+    final List<String> skippedMissingCourses = <String>[];
+
+    for (final ExcelGradeRow row in rows) {
+      final String targetSemesterId =
+          semesterMapping[row.sourceSemesterName]?.trim() ?? '';
+      if (targetSemesterId.isEmpty) {
+        continue;
+      }
+
+      final Course? matchedCourse = _matchCourseForExcelRow(
+        row: row,
+        semesterId: targetSemesterId,
+      );
+      if (matchedCourse == null) {
+        skippedMissingCourses.add(
+          '${row.sourceSemesterName} / ${row.courseName}',
+        );
+        continue;
+      }
+
+      final GradeEntry? existing = _gradeForCourseInSemester(
+        matchedCourse,
+        semesterId: targetSemesterId,
+      );
+      final GradeEntry next = GradeEntry(
+        id: existing?.id,
+        courseId: matchedCourse.id,
+        semesterId: targetSemesterId,
+        courseName: matchedCourse.name,
+        credit: matchedCourse.credit > 0 ? matchedCourse.credit : row.credit,
+        score: row.resultType == GradeResultType.gpa ? row.score : null,
+        gradePoint: row.resultType == GradeResultType.gpa
+            ? row.gradePoint
+            : null,
+        resultType: row.resultType,
+        counted: existing?.counted ?? true,
+      );
+
+      final int index = _grades.indexWhere(
+        (GradeEntry grade) => grade.id == next.id,
+      );
+      if (index >= 0) {
+        _grades[index] = next;
+      } else {
+        _grades.add(next);
+      }
+      appliedCount += 1;
+    }
+
+    _grades = _dedupeGrades(_grades)..sort(_compareGrades);
+    await _persistData();
+    _emitStatus(
+      '成绩导入完成：写入 $appliedCount 条，跳过 ${skippedMissingCourses.length} 条。',
+    );
+    return ExcelGradeImportResult(
+      appliedCount: appliedCount,
+      skippedMissingCourses: skippedMissingCourses,
+    );
   }
 
   Future<File> exportJson({bool includeSettings = true}) async {
@@ -573,33 +679,7 @@ class AppState extends ChangeNotifier {
   }) async {
     final AutoImportResult result = _teachingImportService
         .importFromExtractedPayload(payload);
-
-    final List<Course> semCourses = result.courses
-        .map((Course c) => c.copyWith(semesterId: _currentSemesterId))
-        .toList();
-    final List<GradeEntry> semGrades = result.grades
-        .map((GradeEntry g) => g.copyWith(semesterId: _currentSemesterId))
-        .toList();
-
-    final ({int courses, int grades}) applied = await _applyImportedData(
-      courses: semCourses,
-      grades: semGrades,
-      replaceExisting: replaceExisting,
-      semesterId: _currentSemesterId,
-    );
-
-    final List<String> messages = <String>[
-      ...result.messages,
-      '已写入当前学期：${applied.courses} 门课程，${applied.grades} 条成绩。',
-    ];
-
-    final AutoImportResult mergedResult = AutoImportResult(
-      courses: semCourses,
-      grades: semGrades,
-      messages: messages,
-    );
-    _emitStatus(messages.join(' '));
-    return mergedResult;
+    return _applyAutoImportResult(result, replaceExisting: replaceExisting);
   }
 
   Future<AutoImportResult> importFromTimetableHtmlSnapshot({
@@ -608,30 +688,57 @@ class AppState extends ChangeNotifier {
   }) async {
     final AutoImportResult result = _teachingImportService
         .importFromTimetableHtmlSnapshot(html);
+    return _applyAutoImportResult(result, replaceExisting: replaceExisting);
+  }
 
-    final List<Course> semCourses = result.courses
-        .map((Course c) => c.copyWith(semesterId: _currentSemesterId))
-        .toList();
+  Future<AutoImportResult> importFromJwxtCapture({
+    required Map<String, dynamic> payload,
+    required bool replaceExisting,
+  }) async {
+    final String html = (payload['pageHtml'] as String? ?? '').trim();
+    final AutoImportResult htmlResult = html.isEmpty
+        ? const AutoImportResult(
+            courses: <Course>[],
+            grades: <GradeEntry>[],
+            messages: <String>[],
+          )
+        : _teachingImportService.importFromTimetableHtmlSnapshot(html);
+    final AutoImportResult payloadResult = _teachingImportService
+        .importFromExtractedPayload(payload);
 
-    final ({int courses, int grades}) applied = await _applyImportedData(
-      courses: semCourses,
-      grades: const <GradeEntry>[],
-      replaceExisting: replaceExisting,
-      semesterId: _currentSemesterId,
+    final AutoImportResult mergedSource = _mergeAutoImportResults(
+      <AutoImportResult>[htmlResult, payloadResult],
     );
+    final int onlineCount = mergedSource.courses
+        .where((Course course) => course.isOnline)
+        .length;
+    final int scheduledCount = mergedSource.courses.length - onlineCount;
+    final List<String> sourceMessages = _uniqueMessages(<String>[
+      ...htmlResult.messages,
+      ...payloadResult.messages,
+    ]);
 
     final List<String> messages = <String>[
-      ...result.messages,
-      '已写入当前学期：${applied.courses} 门课程。',
+      if (html.isNotEmpty &&
+          htmlResult.courses.isNotEmpty &&
+          payloadResult.courses.isNotEmpty)
+        '已合并页面源码与页面数据，避免遗漏网课和特殊课程。',
+      if (mergedSource.courses.isNotEmpty)
+        '识别到 ${mergedSource.courses.length} 门课程，其中排课 $scheduledCount 门、网课 $onlineCount 门。',
+      if (mergedSource.grades.isNotEmpty)
+        '识别到 ${mergedSource.grades.length} 条成绩。',
+      if (mergedSource.courses.isEmpty && mergedSource.grades.isEmpty)
+        ...sourceMessages,
     ];
 
-    final AutoImportResult mergedResult = AutoImportResult(
-      courses: semCourses,
-      grades: const <GradeEntry>[],
-      messages: messages,
+    return _applyAutoImportResult(
+      AutoImportResult(
+        courses: mergedSource.courses,
+        grades: mergedSource.grades,
+        messages: messages,
+      ),
+      replaceExisting: replaceExisting,
     );
-    _emitStatus(messages.join(' '));
-    return mergedResult;
   }
 
   Future<void> setThemeMode(ThemeModeSetting value) async {
@@ -999,6 +1106,68 @@ class AppState extends ChangeNotifier {
     return (courses: appliedCourseCount, grades: appliedGradeCount);
   }
 
+  Future<AutoImportResult> _applyAutoImportResult(
+    AutoImportResult result, {
+    required bool replaceExisting,
+  }) async {
+    final List<Course> semCourses = result.courses
+        .map((Course c) => c.copyWith(semesterId: _currentSemesterId))
+        .toList();
+    final List<GradeEntry> semGrades = result.grades
+        .map((GradeEntry g) => g.copyWith(semesterId: _currentSemesterId))
+        .toList();
+
+    final ({int courses, int grades}) applied = await _applyImportedData(
+      courses: semCourses,
+      grades: semGrades,
+      replaceExisting: replaceExisting,
+      semesterId: _currentSemesterId,
+    );
+
+    final List<String> messages = <String>[
+      ...result.messages,
+      '已写入当前学期：${applied.courses} 门课程，${applied.grades} 条成绩。',
+    ];
+
+    final AutoImportResult mergedResult = AutoImportResult(
+      courses: semCourses,
+      grades: semGrades,
+      messages: _uniqueMessages(messages),
+    );
+    _emitStatus(mergedResult.messages.join(' '));
+    return mergedResult;
+  }
+
+  AutoImportResult _mergeAutoImportResults(List<AutoImportResult> results) {
+    final List<Course> courses = _dedupeCourses(
+      results.expand((AutoImportResult result) => result.courses).toList(),
+    );
+    final List<GradeEntry> grades = _dedupeGrades(
+      results.expand((AutoImportResult result) => result.grades).toList(),
+    );
+    final List<String> messages = _uniqueMessages(
+      results.expand((AutoImportResult result) => result.messages).toList(),
+    );
+    return AutoImportResult(
+      courses: courses,
+      grades: grades,
+      messages: messages,
+    );
+  }
+
+  List<String> _uniqueMessages(List<String> messages) {
+    final Set<String> seen = <String>{};
+    final List<String> unique = <String>[];
+    for (final String message in messages) {
+      final String trimmed = message.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) {
+        continue;
+      }
+      unique.add(trimmed);
+    }
+    return unique;
+  }
+
   ({List<Course> merged, int added}) _mergeCourses(
     List<Course> base,
     List<Course> incoming,
@@ -1032,9 +1201,6 @@ class AppState extends ChangeNotifier {
   List<Course> _dedupeCourses(List<Course> courses) {
     final Map<String, Course> map = <String, Course>{};
     for (final Course course in courses) {
-      if (course.sessions.isEmpty) {
-        continue;
-      }
       map[_courseKey(course)] = course;
     }
     return map.values.toList();
@@ -1064,6 +1230,7 @@ class AppState extends ChangeNotifier {
         '${course.code.trim().toLowerCase()}|'
         '${course.teacher.trim().toLowerCase()}|'
         '${course.location.trim().toLowerCase()}|'
+        '${course.courseType.jsonValue}|'
         '${course.credit.toStringAsFixed(2)}|'
         '${sessionKeys.join(';')}';
   }
@@ -1088,6 +1255,12 @@ class AppState extends ChangeNotifier {
   int _compareCourses(Course a, Course b) {
     if (a.semesterId != b.semesterId) {
       return a.semesterId.compareTo(b.semesterId);
+    }
+    if (a.isOnline != b.isOnline) {
+      return a.isOnline ? 1 : -1;
+    }
+    if (!a.hasSchedule && !b.hasSchedule) {
+      return a.name.compareTo(b.name);
     }
 
     final CourseSession aSession = _firstSession(a);
@@ -1117,6 +1290,15 @@ class AppState extends ChangeNotifier {
   }
 
   CourseSession _firstSession(Course course) {
+    if (course.sessions.isEmpty) {
+      return const CourseSession(
+        weekday: DateTime.monday,
+        startPeriod: 99,
+        endPeriod: 99,
+        startWeek: 1,
+        endWeek: 1,
+      );
+    }
     final List<CourseSession> sessions =
         List<CourseSession>.from(course.sessions)
           ..sort((CourseSession a, CourseSession b) {
@@ -1144,6 +1326,49 @@ class AppState extends ChangeNotifier {
       return 999;
     }
     return starts.reduce(math.min);
+  }
+
+  Course? _matchCourseForExcelRow({
+    required ExcelGradeRow row,
+    required String semesterId,
+  }) {
+    final Iterable<Course> semesterCourses = _courses.where(
+      (Course course) => course.semesterId == semesterId,
+    );
+    final String normalizedCode = row.courseCode.trim().toLowerCase();
+    if (normalizedCode.isNotEmpty) {
+      for (final Course course in semesterCourses) {
+        if (course.code.trim().toLowerCase() == normalizedCode) {
+          return course;
+        }
+      }
+    }
+
+    final String normalizedName = row.courseName.trim().toLowerCase();
+    for (final Course course in semesterCourses) {
+      if (course.name.trim().toLowerCase() == normalizedName) {
+        return course;
+      }
+    }
+    return null;
+  }
+
+  GradeEntry? _gradeForCourseInSemester(
+    Course course, {
+    required String semesterId,
+  }) {
+    for (final GradeEntry grade in _grades) {
+      if (grade.semesterId == semesterId && grade.courseId == course.id) {
+        return grade;
+      }
+    }
+    for (final GradeEntry grade in _grades) {
+      if (grade.semesterId == semesterId &&
+          grade.courseName.trim() == course.name.trim()) {
+        return grade;
+      }
+    }
+    return null;
   }
 
   Course _normalizeCourseSemester(Course course) {

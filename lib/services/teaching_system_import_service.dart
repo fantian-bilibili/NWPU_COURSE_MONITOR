@@ -97,20 +97,24 @@ class TeachingSystemImportService {
         'title',
       ]);
       final String code = _firstString(row, <String>['code', 'courseCode']);
-      final String scheduleText = _firstString(row, <String>[
+      String scheduleText = _firstString(row, <String>[
         'scheduleText',
         'schedule',
         'timeText',
         'timeDesc',
       ]);
-      if (name.isEmpty || scheduleText.isEmpty) {
+      if (scheduleText.isEmpty) {
+        scheduleText = _firstString(row, <String>['rowText', 'arrangeText']);
+      }
+      if (name.isEmpty) {
         continue;
       }
 
       final String teacher = _normalizeTeacher(
         _firstString(row, <String>['teacher', 'teacherName', 'jsxm']),
       );
-      if (_isOnlineCourse(name, teacher, scheduleText)) {
+      final bool isOnline = _isOnlineCourse(name, teacher, scheduleText);
+      if (scheduleText.isEmpty && !isOnline) {
         continue;
       }
 
@@ -149,11 +153,15 @@ class TeachingSystemImportService {
           location: location,
           scheduleText: scheduleText,
           dataSemester: _firstString(row, <String>['dataSemester', 'semester']),
+          isOnline: isOnline,
         ),
       );
     }
 
     final List<Course> courses = _buildCoursesFromRaw(rawCourses);
+    final int onlineCount = courses
+        .where((Course course) => course.isOnline)
+        .length;
     final List<dynamic> semesterList =
         (payload['semesters'] as List<dynamic>?) ?? <dynamic>[];
     final int semesterCount = semesterList
@@ -168,7 +176,8 @@ class TeachingSystemImportService {
 
     final List<String> messages = <String>[
       if (semesterCount > 0) '识别到 $semesterCount 个学期数据。',
-      '页面提取到 ${rawCourses.length} 条课程，成功导入 ${courses.length} 门课程。',
+      '页面提取到 ${rawCourses.length} 条课程，成功导入 ${courses.length} 门课程'
+          '${onlineCount > 0 ? '（含 $onlineCount 门网课）' : ''}。',
       if (courses.isEmpty) '未识别到可导入课程，请确认当前页面是“我的课表-全部课程”。',
     ];
 
@@ -340,9 +349,7 @@ class TeachingSystemImportService {
       }
 
       final String teacher = _normalizeTeacher(teacherRaw);
-      if (_isOnlineCourse(courseName, teacher, scheduleText)) {
-        continue;
-      }
+      final bool isOnline = _isOnlineCourse(courseName, teacher, scheduleText);
 
       rawCourses.add(
         _RawNwpuCourse(
@@ -353,6 +360,7 @@ class TeachingSystemImportService {
           location: location,
           scheduleText: scheduleText,
           dataSemester: dataSemester,
+          isOnline: isOnline,
         ),
       );
     }
@@ -366,14 +374,31 @@ class TeachingSystemImportService {
 
     final Map<String, Course> merged = <String, Course>{};
     for (final _RawNwpuCourse raw in rawCourses) {
-      final List<_ParsedSlot> slots = _parseScheduleText(raw.scheduleText);
-      if (slots.isEmpty) {
-        continue;
-      }
       final String normalizedLocation = _sanitizeLocationCandidate(
         raw.location,
         courseCode: raw.code,
       );
+      if (raw.isOnline) {
+        final String key =
+            '${raw.name}|${raw.teacher}|${raw.code}|${raw.dataSemester}|online';
+        merged[key] = Course(
+          name: raw.name,
+          semesterId: raw.dataSemester,
+          code: raw.code,
+          teacher: raw.teacher,
+          location: normalizedLocation,
+          credit: raw.credits,
+          colorValue: _colorByName(raw.name),
+          courseType: CourseType.online,
+          sessions: const <CourseSession>[],
+        );
+        continue;
+      }
+
+      final List<_ParsedSlot> slots = _parseScheduleText(raw.scheduleText);
+      if (slots.isEmpty) {
+        continue;
+      }
 
       final List<CourseSession> sessions = <CourseSession>[];
       for (final _ParsedSlot slot in slots) {
@@ -413,6 +438,7 @@ class TeachingSystemImportService {
           location: normalizedLocation,
           credit: raw.credits,
           colorValue: _colorByName(raw.name),
+          courseType: CourseType.scheduled,
           sessions: sessions,
         );
       } else {
@@ -1117,6 +1143,7 @@ class TeachingSystemImportService {
       '网络课程',
       '网络',
       'mooc',
+      '不排课',
     ];
     final String textToCheck = '$name $teacher $scheduleText'.toLowerCase();
     return onlineKeywords.any(
@@ -1206,6 +1233,13 @@ class TeachingSystemImportService {
       'jxcdmc',
       'room',
     ]);
+    final String scheduleText = _firstString(item, <String>[
+      'timeText',
+      'timeDesc',
+      'sjms',
+      'scheduleText',
+      'arrangeText',
+    ]);
     final int? weekday = _parseWeekday(
       _firstValue(item, <String>[
         'weekday',
@@ -1226,8 +1260,9 @@ class TeachingSystemImportService {
     );
     final double credit =
         _parseDouble(_firstValue(item, <String>['credit', 'xf'])) ?? 0;
+    final bool isOnline = _isOnlineCourse(name, teacher, scheduleText);
 
-    if (weekday == null) {
+    if (weekday == null && !isOnline) {
       return null;
     }
 
@@ -1239,16 +1274,19 @@ class TeachingSystemImportService {
       location: location,
       credit: credit,
       colorValue: _colorByName(name),
-      sessions: <CourseSession>[
-        CourseSession(
-          weekday: weekday,
-          startPeriod: section.start,
-          endPeriod: section.end,
-          startWeek: weeks.startWeek,
-          endWeek: weeks.endWeek,
-          weekType: weeks.weekType,
-        ),
-      ],
+      courseType: isOnline ? CourseType.online : CourseType.scheduled,
+      sessions: isOnline
+          ? const <CourseSession>[]
+          : <CourseSession>[
+              CourseSession(
+                weekday: weekday!,
+                startPeriod: section.start,
+                endPeriod: section.end,
+                startWeek: weeks.startWeek,
+                endWeek: weeks.endWeek,
+                weekType: weeks.weekType,
+              ),
+            ],
     );
   }
 
@@ -1491,6 +1529,7 @@ class _RawNwpuCourse {
     required this.location,
     required this.scheduleText,
     required this.dataSemester,
+    required this.isOnline,
   });
 
   final String name;
@@ -1500,6 +1539,7 @@ class _RawNwpuCourse {
   final String location;
   final String scheduleText;
   final String dataSemester;
+  final bool isOnline;
 }
 
 class _ParsedSlot {

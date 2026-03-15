@@ -22,7 +22,7 @@ class GpaPage extends StatelessWidget {
           );
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, _gpaBottomInset(context)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -92,7 +92,12 @@ class GpaPage extends StatelessWidget {
               child: graded.isEmpty
                   ? _EmptyGradesState(theme: theme)
                   : ListView.separated(
-                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                      padding: EdgeInsets.fromLTRB(
+                        16,
+                        16,
+                        16,
+                        _gpaBottomInset(context),
+                      ),
                       itemCount: graded.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (BuildContext context, int index) {
@@ -133,6 +138,14 @@ class GpaPage extends StatelessWidget {
     }
     return null;
   }
+}
+
+double _gpaBottomInset(BuildContext context) {
+  final bool mobile = MediaQuery.sizeOf(context).width < 720;
+  if (!mobile) {
+    return 12;
+  }
+  return MediaQuery.paddingOf(context).bottom + 108;
 }
 
 class _SummaryCountCard extends StatelessWidget {

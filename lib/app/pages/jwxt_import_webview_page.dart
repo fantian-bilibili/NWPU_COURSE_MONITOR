@@ -253,12 +253,10 @@ const String _extractDataScript = r'''
       dataSemester: dataSemester
     };
 
-    if (!course.scheduleText) {
+    if (!course.scheduleText && !isOnlineCourse(course.name, course.teacher, rowText)) {
       return null;
     }
-    if (isOnlineCourse(course.name, course.teacher, course.scheduleText)) {
-      return null;
-    }
+    course.isOnline = isOnlineCourse(course.name, course.teacher, course.scheduleText || rowText);
     return course;
   }
 

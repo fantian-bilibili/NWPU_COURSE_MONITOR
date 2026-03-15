@@ -19,6 +19,20 @@ extension WeekTypeCodec on WeekType {
   };
 }
 
+enum CourseType { scheduled, online }
+
+extension CourseTypeCodec on CourseType {
+  String get jsonValue => switch (this) {
+    CourseType.scheduled => 'scheduled',
+    CourseType.online => 'online',
+  };
+
+  static CourseType fromJson(String? value) => switch (value) {
+    'online' => CourseType.online,
+    _ => CourseType.scheduled,
+  };
+}
+
 class CourseSession {
   const CourseSession({
     required this.weekday,
@@ -109,6 +123,7 @@ class Course {
     this.location = '',
     this.credit = 0,
     this.colorValue = 0xFF4A90E2,
+    this.courseType = CourseType.scheduled,
     required this.sessions,
   }) : id = id ?? _uuid.v4();
 
@@ -120,9 +135,12 @@ class Course {
   final String location;
   final double credit;
   final int colorValue;
+  final CourseType courseType;
   final List<CourseSession> sessions;
 
   Color get color => Color(colorValue);
+  bool get isOnline => courseType == CourseType.online;
+  bool get hasSchedule => sessions.isNotEmpty;
 
   Course copyWith({
     String? id,
@@ -133,6 +151,7 @@ class Course {
     String? location,
     double? credit,
     int? colorValue,
+    CourseType? courseType,
     List<CourseSession>? sessions,
   }) {
     return Course(
@@ -144,15 +163,23 @@ class Course {
       location: location ?? this.location,
       credit: credit ?? this.credit,
       colorValue: colorValue ?? this.colorValue,
+      courseType: courseType ?? this.courseType,
       sessions: sessions ?? this.sessions,
     );
   }
 
   String signature() {
-    final CourseSession base = sessions.first;
-    return '${semesterId.trim()}|${name.trim()}|${code.trim()}|${teacher.trim()}|${location.trim()}|'
-        '${base.weekday}|${base.startPeriod}|${base.endPeriod}|'
-        '${base.startWeek}|${base.endWeek}|${base.weekType.jsonValue}';
+    final List<String> sessionKeys =
+        sessions
+            .map(
+              (CourseSession session) =>
+                  '${session.weekday}|${session.startPeriod}|${session.endPeriod}|'
+                  '${session.startWeek}|${session.endWeek}|${session.weekType.jsonValue}',
+            )
+            .toList()
+          ..sort();
+    return '${semesterId.trim()}|${name.trim()}|${code.trim()}|${teacher.trim()}|'
+        '${location.trim()}|${courseType.jsonValue}|${sessionKeys.join(";")}';
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
@@ -164,6 +191,7 @@ class Course {
     'location': location,
     'credit': credit,
     'colorValue': colorValue,
+    'courseType': courseType.jsonValue,
     'sessions': sessions.map((CourseSession e) => e.toJson()).toList(),
   };
 
@@ -179,6 +207,7 @@ class Course {
       location: (json['location'] as String?)?.trim() ?? '',
       credit: (json['credit'] as num?)?.toDouble() ?? 0,
       colorValue: (json['colorValue'] as num?)?.toInt() ?? 0xFF4A90E2,
+      courseType: CourseTypeCodec.fromJson(json['courseType'] as String?),
       sessions: rawSessions
           .whereType<Map<String, dynamic>>()
           .map(CourseSession.fromJson)
@@ -601,6 +630,50 @@ class ImportBundle {
   final String? currentSemesterId;
   final bool allSemesters;
   final AppSettings? settings;
+}
+
+class ExcelGradeRow {
+  const ExcelGradeRow({
+    required this.sheetName,
+    required this.sourceSemesterName,
+    required this.courseName,
+    required this.courseCode,
+    required this.credit,
+    required this.rawResult,
+    required this.resultType,
+    this.score,
+    this.gradePoint,
+  });
+
+  final String sheetName;
+  final String sourceSemesterName;
+  final String courseName;
+  final String courseCode;
+  final double credit;
+  final String rawResult;
+  final GradeResultType resultType;
+  final double? score;
+  final double? gradePoint;
+}
+
+class ExcelGradeParseResult {
+  const ExcelGradeParseResult({
+    required this.rows,
+    required this.sourceSemesters,
+  });
+
+  final List<ExcelGradeRow> rows;
+  final List<String> sourceSemesters;
+}
+
+class ExcelGradeImportResult {
+  const ExcelGradeImportResult({
+    required this.appliedCount,
+    required this.skippedMissingCourses,
+  });
+
+  final int appliedCount;
+  final List<String> skippedMissingCourses;
 }
 
 class TeachingSystemConfig {

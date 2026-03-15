@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../generated/version_info.g.dart';
 import '../../models/models.dart';
 import '../../state/app_state.dart';
 import '../widgets/frosted_panel.dart';
@@ -93,7 +94,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final AppState appState = widget.appState;
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, _settingsBottomInset(context)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -117,6 +118,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _semesterPanel(BuildContext context, AppState appState) {
+    final ThemeData theme = Theme.of(context);
     return FrostedPanel(
       enabled: appState.settings.frostedCards,
       child: Padding(
@@ -126,34 +128,73 @@ class _SettingsPageState extends State<SettingsPage> {
           children: <Widget>[
             Text('学期管理', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              key: ValueKey<String>(appState.currentSemester.id),
-              initialValue: appState.currentSemester.id,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: '当前学期',
-                isDense: true,
+            Text(
+              '当前学期',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
-              items: appState.semesters
-                  .map(
-                    (SemesterInfo semester) => DropdownMenuItem<String>(
-                      value: semester.id,
-                      child: Text(
-                        semester.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 8),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _pickCurrentSemester(context, appState),
+                borderRadius: BorderRadius.circular(18),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surface.withValues(alpha: 0.74),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                  ),
+                  child: Row(
+                    children: <Widget>[
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.12,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Icon(
+                          Icons.school_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
                       ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (String? value) async {
-                if (value == null) {
-                  return;
-                }
-                await appState.runWithBusy(
-                  () => appState.switchSemester(value),
-                );
-              },
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text(
+                              appState.currentSemester.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '共 ${appState.semesters.length} 个学期 · 点按切换',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.unfold_more_rounded,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ),
             const SizedBox(height: 10),
             _InfoLine(
@@ -177,6 +218,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       _editSemester(context, appState.currentSemester),
                   icon: const Icon(Icons.edit_outlined),
                   label: const Text('编辑当前学期'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: appState.semesters.length <= 1
+                      ? null
+                      : () =>
+                            _deleteSemester(context, appState.currentSemester),
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('删除当前学期'),
                 ),
               ],
             ),
@@ -440,9 +489,7 @@ class _SettingsPageState extends State<SettingsPage> {
       future: _packageInfoFuture,
       builder: (BuildContext context, AsyncSnapshot<PackageInfo> snapshot) {
         final PackageInfo? info = snapshot.data;
-        final String versionText = info == null
-            ? '1.0.1'
-            : '${info.version}${info.buildNumber.isEmpty ? '' : ' (${info.buildNumber})'}';
+        final String versionText = kAppDisplayVersionWithBuild;
 
         return FrostedPanel(
           enabled: appState.settings.frostedCards,
@@ -512,8 +559,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _showAboutSheet(BuildContext context, PackageInfo? info) async {
     final ThemeData theme = Theme.of(context);
-    final String versionText = info == null ? '1.0.1' : info.version;
-    final String buildText = info == null ? '2' : info.buildNumber;
+    final String versionText = kAppDisplayVersion;
+    final String buildText = kAppBuildNumber;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -674,6 +721,140 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Future<void> _pickCurrentSemester(
+    BuildContext context,
+    AppState appState,
+  ) async {
+    final String? selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      useSafeArea: true,
+      builder: (BuildContext context) {
+        final ThemeData theme = Theme.of(context);
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
+          child: FrostedPanel(
+            enabled: appState.settings.frostedCards,
+            padding: EdgeInsets.zero,
+            radius: 28,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          '选择当前学期',
+                          style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('关闭'),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 420),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: appState.semesters.length,
+                      separatorBuilder: (_, int index) =>
+                          const SizedBox(height: 8),
+                      itemBuilder: (BuildContext context, int index) {
+                        final SemesterInfo semester = appState.semesters[index];
+                        final bool selected =
+                            semester.id == appState.currentSemester.id;
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Navigator.of(context).pop(semester.id),
+                            borderRadius: BorderRadius.circular(18),
+                            child: Container(
+                              padding: const EdgeInsets.fromLTRB(
+                                14,
+                                12,
+                                14,
+                                12,
+                              ),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? theme.colorScheme.primary.withValues(
+                                        alpha: 0.12,
+                                      )
+                                    : theme.colorScheme.surface.withValues(
+                                        alpha: 0.68,
+                                      ),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: selected
+                                      ? theme.colorScheme.primary.withValues(
+                                          alpha: 0.42,
+                                        )
+                                      : theme.colorScheme.outlineVariant
+                                            .withValues(alpha: 0.72),
+                                ),
+                              ),
+                              child: Row(
+                                children: <Widget>[
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: <Widget>[
+                                        Text(
+                                          semester.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: theme.textTheme.titleSmall
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '第一周周一：${DateFormat('yyyy-MM-dd').format(semester.termStartMonday)}',
+                                          style: theme.textTheme.bodySmall,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Icon(
+                                    selected
+                                        ? Icons.check_circle_rounded
+                                        : Icons.radio_button_unchecked_rounded,
+                                    color: selected
+                                        ? theme.colorScheme.primary
+                                        : theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+    if (selected == null || selected == appState.currentSemester.id) {
+      return;
+    }
+    await appState.runWithBusy(() => appState.switchSemester(selected));
+  }
+
   Future<void> _editSemester(
     BuildContext context,
     SemesterInfo semester,
@@ -694,6 +875,40 @@ class _SettingsPageState extends State<SettingsPage> {
         name: draft.name,
         termStartMonday: draft.termStartMonday,
       ),
+    );
+  }
+
+  Future<void> _deleteSemester(
+    BuildContext context,
+    SemesterInfo semester,
+  ) async {
+    final bool confirmed =
+        await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              title: const Text('删除学期'),
+              content: Text('将删除“${semester.name}”以及该学期下的全部课程和成绩。此操作不可撤销。'),
+              actions: <Widget>[
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('删除'),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+    if (!confirmed) {
+      return;
+    }
+
+    await widget.appState.runWithBusy(
+      () => widget.appState.deleteSemester(semester.id),
     );
   }
 
@@ -1087,6 +1302,14 @@ class _SettingsPageState extends State<SettingsPage> {
     final bool autumn = now.month >= 8 || now.month <= 1;
     return '${now.year} ${autumn ? '秋季学期' : '春季学期'}';
   }
+}
+
+double _settingsBottomInset(BuildContext context) {
+  final bool mobile = MediaQuery.sizeOf(context).width < 720;
+  if (!mobile) {
+    return 12;
+  }
+  return MediaQuery.paddingOf(context).bottom + 108;
 }
 
 class _ThemeModeSelector extends StatelessWidget {

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:csv/csv.dart';
+import 'package:excel/excel.dart' as xls;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -71,6 +72,7 @@ class ImportExportService {
         'endWeek',
         'weekType',
         'colorValue',
+        'courseType',
         'courseId',
         'score',
         'gradePoint',
@@ -80,6 +82,31 @@ class ImportExportService {
     ];
 
     for (final Course course in bundle.courses) {
+      if (course.isOnline || course.sessions.isEmpty) {
+        rows.add(<dynamic>[
+          'course',
+          course.semesterId,
+          course.id,
+          course.name,
+          course.code,
+          course.teacher,
+          course.location,
+          course.credit,
+          '',
+          '',
+          '',
+          '',
+          '',
+          '',
+          course.colorValue,
+          course.courseType.jsonValue,
+          '',
+          '',
+          '',
+          '',
+        ]);
+        continue;
+      }
       for (final CourseSession session in course.sessions) {
         rows.add(<dynamic>[
           'course',
@@ -97,6 +124,7 @@ class ImportExportService {
           session.endWeek,
           session.weekType.jsonValue,
           course.colorValue,
+          course.courseType.jsonValue,
           '',
           '',
           '',
@@ -115,6 +143,7 @@ class ImportExportService {
         '',
         '',
         grade.credit,
+        '',
         '',
         '',
         '',
@@ -165,7 +194,6 @@ class ImportExportService {
       final List<Course> courses = decoded
           .whereType<Map<String, dynamic>>()
           .map(Course.fromJson)
-          .where((Course c) => c.sessions.isNotEmpty)
           .toList();
       return ImportBundle(courses: courses, grades: const <GradeEntry>[]);
     }
@@ -194,7 +222,6 @@ class ImportExportService {
       final List<Course> courses = rawCourses
           .whereType<Map<String, dynamic>>()
           .map(Course.fromJson)
-          .where((Course c) => c.sessions.isNotEmpty)
           .toList();
       final List<GradeEntry> grades = rawGrades
           .whereType<Map<String, dynamic>>()
@@ -237,18 +264,28 @@ class ImportExportService {
 
       final String type = (row['type'] ?? '').toLowerCase();
       if (type == 'course') {
-        final CourseSession session = CourseSession(
-          weekday: _toInt(row['weekday']) ?? 1,
-          startPeriod: _toInt(row['startPeriod']) ?? 1,
-          endPeriod: _toInt(row['endPeriod']) ?? 2,
-          startWeek: _toInt(row['startWeek']) ?? 1,
-          endWeek: _toInt(row['endWeek']) ?? 20,
-          weekType: WeekTypeCodec.fromJson(row['weekType']),
-        );
-
         final String courseKey = _csvCourseKey(row);
         final Course? existing = coursesByKey[courseKey];
+        final CourseType courseType = CourseTypeCodec.fromJson(
+          row['courseType'],
+        );
+        final bool hasSchedule =
+            _toInt(row['weekday']) != null &&
+            _toInt(row['startPeriod']) != null &&
+            _toInt(row['endPeriod']) != null;
         if (existing == null) {
+          final List<CourseSession> sessions = hasSchedule
+              ? <CourseSession>[
+                  CourseSession(
+                    weekday: _toInt(row['weekday']) ?? 1,
+                    startPeriod: _toInt(row['startPeriod']) ?? 1,
+                    endPeriod: _toInt(row['endPeriod']) ?? 2,
+                    startWeek: _toInt(row['startWeek']) ?? 1,
+                    endWeek: _toInt(row['endWeek']) ?? 20,
+                    weekType: WeekTypeCodec.fromJson(row['weekType']),
+                  ),
+                ]
+              : const <CourseSession>[];
           coursesByKey[courseKey] = Course(
             id: _optionalString(row['id']),
             semesterId: _safeString(row['semesterId']),
@@ -258,9 +295,18 @@ class ImportExportService {
             location: _safeString(row['location']),
             credit: _toDouble(row['credit']) ?? 0,
             colorValue: _toInt(row['colorValue']) ?? 0xFF4A90E2,
-            sessions: <CourseSession>[session],
+            courseType: courseType,
+            sessions: sessions,
           );
-        } else {
+        } else if (hasSchedule) {
+          final CourseSession session = CourseSession(
+            weekday: _toInt(row['weekday']) ?? 1,
+            startPeriod: _toInt(row['startPeriod']) ?? 1,
+            endPeriod: _toInt(row['endPeriod']) ?? 2,
+            startWeek: _toInt(row['startWeek']) ?? 1,
+            endWeek: _toInt(row['endWeek']) ?? 20,
+            weekType: WeekTypeCodec.fromJson(row['weekType']),
+          );
           final bool sessionExists = existing.sessions.any(
             (CourseSession item) =>
                 item.weekday == session.weekday &&
@@ -294,6 +340,98 @@ class ImportExportService {
     }
 
     return ImportBundle(courses: coursesByKey.values.toList(), grades: grades);
+  }
+
+  Future<ExcelGradeParseResult> parseGradeExcel(String path) async {
+    final File file = File(path);
+    if (!await file.exists()) {
+      throw Exception('文件不存在：$path');
+    }
+
+    final List<int> bytes = await file.readAsBytes();
+    final xls.Excel workbook;
+    try {
+      workbook = xls.Excel.decodeBytes(bytes);
+    } catch (_) {
+      throw Exception('无法解析 Excel 文件，请优先使用 .xlsx 格式。');
+    }
+
+    final List<ExcelGradeRow> rows = <ExcelGradeRow>[];
+    final Set<String> sourceSemesters = <String>{};
+
+    for (final MapEntry<String, xls.Sheet> entry in workbook.tables.entries) {
+      final xls.Sheet sheet = entry.value;
+      final List<List<xls.Data?>> sheetRows = sheet.rows;
+      if (sheetRows.isEmpty) {
+        continue;
+      }
+
+      final int headerRowIndex = _findExcelHeaderRow(sheetRows);
+      if (headerRowIndex < 0) {
+        continue;
+      }
+
+      final Map<String, int> columns = _buildExcelColumnMap(
+        sheetRows[headerRowIndex],
+      );
+      for (
+        int rowIndex = headerRowIndex + 1;
+        rowIndex < sheetRows.length;
+        rowIndex++
+      ) {
+        final List<xls.Data?> row = sheetRows[rowIndex];
+        final String courseName = _excelCellTextAt(row, columns['courseName']);
+        final String courseCode = _excelCellTextAt(row, columns['courseCode']);
+        final String semesterName = _excelCellTextAt(row, columns['semester']);
+        final String resultText = _excelCellTextAt(row, columns['result']);
+        final String gradePointText = _excelCellTextAt(
+          row,
+          columns['gradePoint'],
+        );
+        final String creditText = _excelCellTextAt(row, columns['credit']);
+
+        if (_isExcelGradeRowEmpty(row)) {
+          continue;
+        }
+        if (courseName.isEmpty || semesterName.isEmpty) {
+          continue;
+        }
+
+        final GradeResultType? resultType = _parseExcelResultType(
+          resultText,
+          gradePointText,
+        );
+        if (resultType == null) {
+          continue;
+        }
+
+        rows.add(
+          ExcelGradeRow(
+            sheetName: entry.key,
+            sourceSemesterName: semesterName,
+            courseName: courseName,
+            courseCode: courseCode,
+            credit: _toDouble(creditText) ?? 0,
+            rawResult: resultText.isNotEmpty ? resultText : gradePointText,
+            resultType: resultType,
+            score: resultType == GradeResultType.gpa
+                ? _toDouble(resultText)
+                : null,
+            gradePoint: resultType == GradeResultType.gpa
+                ? _toDouble(gradePointText)
+                : null,
+          ),
+        );
+        sourceSemesters.add(semesterName);
+      }
+    }
+
+    if (rows.isEmpty) {
+      throw Exception('未识别到可导入的成绩数据，请确认 Excel 包含“课程名称、成绩、学期”等列。');
+    }
+
+    final List<String> semesters = sourceSemesters.toList()..sort();
+    return ExcelGradeParseResult(rows: rows, sourceSemesters: semesters);
   }
 
   ImportBundle _parseIcs(String content, {required AppSettings settings}) {
@@ -767,6 +905,119 @@ class ImportExportService {
     return sessions;
   }
 
+  int _findExcelHeaderRow(List<List<xls.Data?>> rows) {
+    final int limit = rows.length < 16 ? rows.length : 16;
+    for (int i = 0; i < limit; i++) {
+      final Map<String, int> columns = _buildExcelColumnMap(rows[i]);
+      if (columns['courseName'] != null &&
+          columns['semester'] != null &&
+          (columns['result'] != null || columns['gradePoint'] != null)) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  Map<String, int> _buildExcelColumnMap(List<xls.Data?> row) {
+    final Map<String, int> mapping = <String, int>{};
+    for (int index = 0; index < row.length; index++) {
+      final String header = _normalizeExcelHeader(_excelCellText(row[index]));
+      if (header.isEmpty) {
+        continue;
+      }
+      if (!_hasColumn(mapping, 'courseName') &&
+          <String>{'课程名称', '课程名'}.contains(header)) {
+        mapping['courseName'] = index;
+      } else if (!_hasColumn(mapping, 'courseCode') &&
+          <String>{'课程代码', '课程序号', '课程编号'}.contains(header)) {
+        mapping['courseCode'] = index;
+      } else if (!_hasColumn(mapping, 'credit') &&
+          <String>{'学分'}.contains(header)) {
+        mapping['credit'] = index;
+      } else if (!_hasColumn(mapping, 'result') &&
+          <String>{'成绩', '总评成绩', '最终成绩'}.contains(header)) {
+        mapping['result'] = index;
+      } else if (!_hasColumn(mapping, 'gradePoint') &&
+          <String>{'绩点', '学分绩'}.contains(header)) {
+        mapping['gradePoint'] = index;
+      } else if (!_hasColumn(mapping, 'semester') &&
+          <String>{'学期', '学年学期'}.contains(header)) {
+        mapping['semester'] = index;
+      }
+    }
+    return mapping;
+  }
+
+  bool _hasColumn(Map<String, int> mapping, String key) => mapping[key] != null;
+
+  String _normalizeExcelHeader(String value) {
+    return value
+        .replaceAll(RegExp(r'[\s\r\n\t]'), '')
+        .replaceAll('（', '(')
+        .replaceAll('）', ')')
+        .trim();
+  }
+
+  String _excelCellTextAt(List<xls.Data?> row, int? index) {
+    if (index == null || index < 0 || index >= row.length) {
+      return '';
+    }
+    return _excelCellText(row[index]);
+  }
+
+  String _excelCellText(xls.Data? cell) {
+    final xls.CellValue? value = cell?.value;
+    if (value == null) {
+      return '';
+    }
+    return switch (value) {
+      xls.TextCellValue() =>
+        (value.value.text ?? value.value.toString()).trim(),
+      xls.FormulaCellValue() => value.formula.trim(),
+      xls.IntCellValue() => value.value.toString(),
+      xls.DoubleCellValue() => value.value.toString(),
+      xls.BoolCellValue() => value.value.toString(),
+      xls.DateCellValue() => value.asDateTimeLocal().toIso8601String(),
+      xls.DateTimeCellValue() => value.asDateTimeLocal().toIso8601String(),
+      xls.TimeCellValue() =>
+        '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}',
+    };
+  }
+
+  bool _isExcelGradeRowEmpty(List<xls.Data?> row) {
+    return row.every((xls.Data? cell) => _excelCellText(cell).trim().isEmpty);
+  }
+
+  GradeResultType? _parseExcelResultType(
+    String resultText,
+    String gradePointText,
+  ) {
+    final String normalizedResult = resultText.trim().toUpperCase();
+    final String normalizedGradePoint = gradePointText.trim().toUpperCase();
+    if (<String>{'P', 'PASS', '通过', '合格'}.contains(normalizedResult)) {
+      return GradeResultType.pass;
+    }
+    if (<String>{'NP', 'N/P', '未通过', '不合格', '不通过'}.contains(normalizedResult)) {
+      return GradeResultType.noPass;
+    }
+    if (_toDouble(resultText) != null || _toDouble(gradePointText) != null) {
+      return GradeResultType.gpa;
+    }
+    if (<String>{'P', 'PASS', '通过', '合格'}.contains(normalizedGradePoint)) {
+      return GradeResultType.pass;
+    }
+    if (<String>{
+      'NP',
+      'N/P',
+      '未通过',
+      '不合格',
+      '不通过',
+    }.contains(normalizedGradePoint)) {
+      return GradeResultType.noPass;
+    }
+    return null;
+  }
+
   int? _toInt(String? value) {
     if (value == null || value.trim().isEmpty) {
       return null;
@@ -802,6 +1053,7 @@ class ImportExportService {
         '${_safeString(row['code']).toLowerCase()}|'
         '${_safeString(row['teacher']).toLowerCase()}|'
         '${_safeString(row['location']).toLowerCase()}|'
+        '${_safeString(row['courseType'], fallback: 'scheduled').toLowerCase()}|'
         '${(_toDouble(row['credit']) ?? 0).toStringAsFixed(2)}|'
         '${_toInt(row['colorValue']) ?? 0xFF4A90E2}';
   }
