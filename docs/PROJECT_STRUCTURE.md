@@ -44,9 +44,10 @@ NWPU_COURSE_MONITOR/
   - 包含日列表、周列表、周视图。
   - 课程详情的折叠展开和绩点录入入口也在这里。
 - `lib/app/pages/import_page.dart`
-  - 文件导入导出与教务导入入口。
+  - 文件导入导出、课表教务导入、成绩 Excel 导入、成绩教务导入入口。
 - `lib/app/pages/jwxt_import_webview_page.dart`
   - 教务系统 WebView 导入页面。
+  - 当前支持课表模式与成绩模式两种提取流程。
 - `lib/app/pages/gpa_page.dart`
   - 学分绩总览与已出分课程列表。
 - `lib/app/pages/settings_page.dart`
@@ -70,6 +71,7 @@ NWPU_COURSE_MONITOR/
   - 职责：
     - 课程、成绩、学期、设置的内存态
     - 导入导出流程
+    - 教务课表 / 教务成绩预解析与导入编排
     - 小组件同步
     - 提醒重建
     - Windows 小窗模式切换
@@ -94,6 +96,7 @@ NWPU_COURSE_MONITOR/
   - JSON / CSV 导入导出。
 - `lib/services/teaching_system_import_service.dart`
   - 教务导入、payload 导入、HTML 快照导入。
+  - 当前同时负责课表与成绩页面的解析。
 - `lib/services/notification_service.dart`
   - 通知初始化与重建。
 - `lib/services/widget_sync_service.dart`

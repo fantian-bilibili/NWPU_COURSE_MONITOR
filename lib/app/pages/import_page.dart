@@ -175,10 +175,20 @@ class _ImportPageState extends State<ImportPage> {
             Text('成绩导入', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(
-              '当前先支持 Excel 成绩单导入。后续接教务成绩导入时，也会放在这里。',
+              '这里处理成绩导入。支持 Excel 成绩单，也支持手机端教务成绩一键提取。',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 10),
+            if (_mobileWebImportSupported)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _startGradeWebViewImport,
+                  icon: const Icon(Icons.school_outlined),
+                  label: const Text('手机端一键教务成绩导入'),
+                ),
+              ),
+            if (_mobileWebImportSupported) const SizedBox(height: 8),
             SizedBox(
               width: double.infinity,
               child: FilledButton.tonalIcon(
@@ -309,8 +319,13 @@ class _ImportPageState extends State<ImportPage> {
         return;
       }
 
-      final Map<String, String>? semesterMapping =
-          await _showExcelSemesterMappingDialog(preview);
+      final Map<String, String>?
+      semesterMapping = await _showSemesterMappingDialog(
+        preview,
+        title: '匹配 Excel 学期',
+        helperText:
+            '识别到 ${preview.rows.length} 条成绩，涉及 ${preview.sourceSemesters.length} 个学期。',
+      );
       if (semesterMapping == null) {
         return;
       }
@@ -440,6 +455,65 @@ class _ImportPageState extends State<ImportPage> {
     }
   }
 
+  Future<void> _startGradeWebViewImport() async {
+    if (!_mobileWebImportSupported) {
+      return;
+    }
+
+    final Map<String, dynamic>? payload = await Navigator.of(context)
+        .push<Map<String, dynamic>>(
+          MaterialPageRoute<Map<String, dynamic>>(
+            builder: (_) =>
+                const JwxtImportWebViewPage(mode: JwxtImportMode.grade),
+            fullscreenDialog: true,
+          ),
+        );
+    if (payload == null) {
+      return;
+    }
+
+    final String pageHtml = (payload['pageHtml'] as String? ?? '').trim();
+    if (pageHtml.isEmpty) {
+      _showMessage('未提取到成绩页面内容，请确认已经打开“成绩信息/学生成绩单”页面。');
+      return;
+    }
+
+    try {
+      final ExcelGradeParseResult preview = widget.appState
+          .previewGradeHtmlSnapshot(pageHtml);
+      if (preview.rows.isEmpty) {
+        _showMessage('未识别到成绩，请确认成绩表已经完全加载。');
+        return;
+      }
+
+      final Map<String, String>?
+      semesterMapping = await _showSemesterMappingDialog(
+        preview,
+        title: '匹配教务成绩学期',
+        helperText:
+            '识别到 ${preview.rows.length} 条成绩，涉及 ${preview.sourceSemesters.length} 个学期。',
+      );
+      if (semesterMapping == null) {
+        return;
+      }
+
+      final ExcelGradeImportResult result = await widget.appState.runWithBusy(
+        () => widget.appState.importGradesFromExcel(
+          rows: preview.rows,
+          semesterMapping: semesterMapping,
+        ),
+      );
+      _showMessage(
+        '教务成绩导入完成：写入 ${result.appliedCount} 条，跳过 ${result.skippedMissingCourses.length} 条。',
+      );
+      if (result.skippedMissingCourses.isNotEmpty && mounted) {
+        await _showSkippedCourseDialog(result);
+      }
+    } catch (error) {
+      _showMessage('教务成绩导入失败：${_friendlyError(error)}');
+    }
+  }
+
   String _friendlyError(Object error) {
     final String text = error.toString();
     if (text.startsWith('Exception: ')) {
@@ -455,9 +529,11 @@ class _ImportPageState extends State<ImportPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<Map<String, String>?> _showExcelSemesterMappingDialog(
-    ExcelGradeParseResult preview,
-  ) {
+  Future<Map<String, String>?> _showSemesterMappingDialog(
+    ExcelGradeParseResult preview, {
+    required String title,
+    required String helperText,
+  }) {
     final AppState state = widget.appState;
     final Map<String, String> mapping = <String, String>{
       for (final String semester in preview.sourceSemesters)
@@ -468,81 +544,86 @@ class _ImportPageState extends State<ImportPage> {
       context: context,
       builder: (BuildContext context) {
         return StatefulBuilder(
-          builder: (BuildContext context, void Function(void Function()) setState) {
-            return AlertDialog(
-              title: const Text('匹配 Excel 学期'),
-              content: SizedBox(
-                width: 460,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        '识别到 ${preview.rows.length} 条成绩，涉及 ${preview.sourceSemesters.length} 个学期。',
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      for (final String sourceSemester
-                          in preview.sourceSemesters) ...<Widget>[
-                        Text(
-                          sourceSemester,
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 6),
-                        InputDecorator(
-                          decoration: const InputDecoration(
-                            labelText: '导入到哪个课表学期',
-                            isDense: true,
+          builder:
+              (BuildContext context, void Function(void Function()) setState) {
+                return AlertDialog(
+                  title: Text(title),
+                  content: SizedBox(
+                    width: 460,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            helperText,
+                            style: Theme.of(context).textTheme.bodyMedium,
                           ),
-                          child: DropdownButtonHideUnderline(
-                            child: DropdownButton<String>(
-                              value: mapping[sourceSemester],
-                              isExpanded: true,
-                              items: state.semesters
-                                  .map(
-                                    (SemesterInfo semester) =>
-                                        DropdownMenuItem<String>(
-                                          value: semester.id,
-                                          child: Text(
-                                            semester.name,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                  )
-                                  .toList(),
-                              onChanged: (String? value) {
-                                if (value == null) {
-                                  return;
-                                }
-                                setState(() => mapping[sourceSemester] = value);
-                              },
+                          const SizedBox(height: 12),
+                          for (final String sourceSemester
+                              in preview.sourceSemesters) ...<Widget>[
+                            Text(
+                              sourceSemester,
+                              style: Theme.of(context).textTheme.titleSmall,
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                    ],
+                            const SizedBox(height: 6),
+                            InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '导入到哪个课表学期',
+                                isDense: true,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: mapping[sourceSemester],
+                                  isExpanded: true,
+                                  items: state.semesters
+                                      .map(
+                                        (SemesterInfo semester) =>
+                                            DropdownMenuItem<String>(
+                                              value: semester.id,
+                                              child: Text(
+                                                semester.name,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                      )
+                                      .toList(),
+                                  onChanged: (String? value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(
+                                      () => mapping[sourceSemester] = value,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-              actions: <Widget>[
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed:
-                      mapping.values.any((String value) => value.trim().isEmpty)
-                      ? null
-                      : () => Navigator.of(
-                          context,
-                        ).pop(Map<String, String>.from(mapping)),
-                  child: const Text('开始导入'),
-                ),
-              ],
-            );
-          },
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed:
+                          mapping.values.any(
+                            (String value) => value.trim().isEmpty,
+                          )
+                          ? null
+                          : () => Navigator.of(
+                              context,
+                            ).pop(Map<String, String>.from(mapping)),
+                      child: const Text('开始导入'),
+                    ),
+                  ],
+                );
+              },
         );
       },
     );

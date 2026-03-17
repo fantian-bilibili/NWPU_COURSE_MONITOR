@@ -439,6 +439,10 @@ class AppState extends ChangeNotifier {
     return _importExportService.parseGradeExcel(path);
   }
 
+  ExcelGradeParseResult previewGradeHtmlSnapshot(String html) {
+    return _teachingImportService.previewGradeHtmlSnapshot(html);
+  }
+
   Future<ExcelGradeImportResult> importGradesFromExcel({
     required List<ExcelGradeRow> rows,
     required Map<String, String> semesterMapping,
@@ -459,7 +463,9 @@ class AppState extends ChangeNotifier {
       );
       if (matchedCourse == null) {
         skippedMissingCourses.add(
-          '${row.sourceSemesterName} / ${row.courseName}',
+          row.courseCode.trim().isEmpty
+              ? '${row.sourceSemesterName} / ${row.courseName}'
+              : '${row.sourceSemesterName} / ${row.courseName} (${row.courseCode})',
         );
         continue;
       }

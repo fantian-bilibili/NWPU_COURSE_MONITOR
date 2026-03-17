@@ -200,6 +200,16 @@ class TeachingSystemImportService {
     );
   }
 
+  ExcelGradeParseResult previewGradeHtmlSnapshot(String html) {
+    final List<ExcelGradeRow> rows = _parseGradeRowsFromHtml(html);
+    final List<String> sourceSemesters = rows
+        .map((ExcelGradeRow row) => row.sourceSemesterName.trim())
+        .where((String value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    return ExcelGradeParseResult(rows: rows, sourceSemesters: sourceSemesters);
+  }
+
   List<Course> _parseTimetable(String body) {
     // Prefer structured API JSON first; fallback to HTML scraping for JWXT pages.
     final List<Course> byJson = _parseTimetableFromJson(body);
@@ -598,6 +608,124 @@ class TeachingSystemImportService {
       );
     }
     return grades;
+  }
+
+  List<ExcelGradeRow> _parseGradeRowsFromHtml(String html) {
+    final RegExp semesterBlockRegex = RegExp(
+      r'<h3[^>]*class="[^"]*\bsemesterName\b[^"]*"[^>]*>([\s\S]*?)</h3>'
+      r'[\s\S]*?<table[^>]*class="[^"]*\bstudent-grade-table\b[^"]*"[^>]*>'
+      r'[\s\S]*?<tbody>([\s\S]*?)</tbody>',
+      caseSensitive: false,
+    );
+    final RegExp rowRegex = RegExp(
+      r'<tr[^>]*>([\s\S]*?)</tr>',
+      caseSensitive: false,
+    );
+    final RegExp tdRegex = RegExp(
+      r'<td[^>]*>([\s\S]*?)</td>',
+      caseSensitive: false,
+    );
+
+    final List<ExcelGradeRow> rows = <ExcelGradeRow>[];
+    for (final RegExpMatch blockMatch in semesterBlockRegex.allMatches(html)) {
+      final String semesterName = _stripHtml(blockMatch.group(1) ?? '').trim();
+      final String tbodyHtml = blockMatch.group(2) ?? '';
+      if (semesterName.isEmpty || tbodyHtml.trim().isEmpty) {
+        continue;
+      }
+
+      for (final RegExpMatch rowMatch in rowRegex.allMatches(tbodyHtml)) {
+        final String rowHtml = rowMatch.group(1) ?? '';
+        final List<String> cells = tdRegex
+            .allMatches(rowHtml)
+            .map((RegExpMatch match) => match.group(1) ?? '')
+            .toList();
+        if (cells.length < 4) {
+          continue;
+        }
+
+        final String infoCell = cells[0];
+        final String courseName = _extractGradeCourseName(infoCell);
+        final String courseCode = _extractGradeCourseCode(infoCell);
+        if (courseName.isEmpty) {
+          continue;
+        }
+
+        final double credit = _parseDouble(_stripHtml(cells[1])) ?? 0;
+        final String gradePointText = _stripHtml(cells[2]).trim();
+        final String scoreText = _stripHtml(cells[3]).trim();
+        final GradeResultType resultType = _parseGradeResultType(
+          scoreText: scoreText,
+          gradePointText: gradePointText,
+        );
+
+        rows.add(
+          ExcelGradeRow(
+            sheetName: '教务系统',
+            sourceSemesterName: semesterName,
+            courseName: courseName,
+            courseCode: courseCode,
+            credit: credit,
+            rawResult: scoreText.isNotEmpty ? scoreText : gradePointText,
+            resultType: resultType,
+            score: resultType == GradeResultType.gpa
+                ? _parseDouble(scoreText)
+                : null,
+            gradePoint: resultType == GradeResultType.gpa
+                ? _parseDouble(gradePointText)
+                : null,
+          ),
+        );
+      }
+    }
+
+    return rows;
+  }
+
+  String _extractGradeCourseName(String cellHtml) {
+    final RegExp primaryNameRegex = RegExp(
+      r'<div[^>]*class="[^"]*\bcourse-name\b[^"]*"[^>]*>\s*([^<]+)',
+      caseSensitive: false,
+    );
+    final String primary = _stripHtml(
+      primaryNameRegex.firstMatch(cellHtml)?.group(1) ?? '',
+    ).trim();
+    if (primary.isNotEmpty) {
+      return primary;
+    }
+    return _stripHtml(cellHtml).trim();
+  }
+
+  String _extractGradeCourseCode(String cellHtml) {
+    final RegExp courseCodeRegex = RegExp(
+      r'title="课程代码"[^>]*>([\s\S]*?)</span>',
+      caseSensitive: false,
+    );
+    final String courseCode = _stripHtml(
+      courseCodeRegex.firstMatch(cellHtml)?.group(1) ?? '',
+    ).trim();
+    return courseCode;
+  }
+
+  GradeResultType _parseGradeResultType({
+    required String scoreText,
+    required String gradePointText,
+  }) {
+    final String normalizedScore = scoreText.trim().toUpperCase();
+    final String normalizedGradePoint = gradePointText.trim().toUpperCase();
+    if (normalizedScore == 'NP' || normalizedScore == '不通过') {
+      return GradeResultType.noPass;
+    }
+    if (normalizedScore == 'P' || normalizedScore == '通过') {
+      return GradeResultType.pass;
+    }
+    if (normalizedGradePoint == 'NP') {
+      return GradeResultType.noPass;
+    }
+    if (normalizedGradePoint == 'P') {
+      return GradeResultType.pass;
+    }
+    return GradeResultType.gpa;
   }
 
   List<_ParsedSlot> _parseScheduleText(String scheduleText) {

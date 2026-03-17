@@ -1,53 +1,44 @@
-# NWPU Course Monitor
+# NWPU Course Monitor 课程管家
+*旨在让瓜大学子摆脱天天崩溃的神秘蓝色软件*
 
-基于 Flutter 的多端课程表与成绩管理应用，面向西北工业大学课程导入、学期管理、成绩绑定、提醒通知和桌面/桌面组件展示场景。
 
-当前仓库以 Android 和 Windows 为主验证平台，同时保留 iOS、Web 和 OpenHarmony 方向的适配入口。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Version: v1.0.2--develop](https://img.shields.io/badge/Version-v1.0.2--develop-blue.svg)](https://github.com/fantian-bilibili/NWPU_COURSE_MONITOR/releases)
 
-## 功能概览
+NWPU Course Monitor 是一款基于 Flutter 的多端课程表与成绩管理应用，面向西北工业大学课程导入、学期管理、成绩绑定、提醒通知和桌面/桌面组件展示场景。
 
-- 课程表
-  - 日列表、周列表、周视图三种模式
-  - 课程详情折叠展示
-  - 手动新增、编辑、删除课程
+## AI协作开发声明
+
+当前仓库的开发过程中部分使用了`GPT-5.3-CODEX`以及`GPT-5.4`模型进行代码生成、优化和问题排查。
+
+## 功能与特色
+
+这是一个轻量、跨平台的课程表和成绩管理工具，拥有现代化的UI设计和完整实用的课程表与学分绩管理功能。
+
+- 简洁美观的动效与UI界面
+  - 在开发过程中，我们注重各位同学的体验，设计了简洁美观的界面，并加入了流畅的动效，达成和谐美观的视觉效果。
+- 课程表功能
+  - 支持日列表、周列表、周视图三种模式，满足不同同学的使用习惯。
+  - 课程详情折叠展示，方便查看课程信息。
+  - 支持手动新增、编辑、删除课程，灵活管理课程表。
 - 学期管理
-  - 新建、切换、编辑学期
-  - 课程与成绩按学期独立存储
+  - 支持新建、切换、编辑学期，课程与成绩按学期独立存储，方便管理不同学期的课程和成绩。
 - 教务导入
-  - 移动端内置 WebView 导入
-  - 兼容 NWPU 教务系统页面解析逻辑
-  - 支持提取后的 payload / HTML 快照导入
+    - 移动端内置 WebView 导入，兼容翱翔教务系统页面解析逻辑。
+    - 支持课程表页面一键导入，也支持成绩页面一键提取后导入。
+    - 支持提取后的 payload / HTML 快照导入。
 - 成绩与 GPA
-  - 课程可绑定绩点
-  - 自动计算当前学分绩与已计入学分
+  - 支持 Excel 成绩单导入与教务成绩页导入。
+  - 课程可绑定绩点，自动计算当前学分绩与已计入学分。
+  - 支持 P / NP 成绩，不参与 GPA 计算但计入已出分课程统计。
 - 导入导出
-  - 当前学期：`JSON / CSV`
-  - 全部学期：`JSON`
-  - 可附带作息、提醒等设置
-- 提醒
-  - 依据每节课时间生成上课前通知
-  - 提前分钟数可配置
+    - 支持当前学期的 JSON / CSV 导出，以及全部学期的 JSON 导出，方便备份和迁移数据。
+- 提醒功能
+    - 依据每节课时间生成上课前通知，提前分钟数可配置，帮助同学们准时上课。
 - 桌面组件 / 小组件
-  - Android 今日课程组件
-  - Windows 小窗模式
+    - Android 今日课程组件，Windows 小窗模式，方便在桌面上查看课程信息。
 
-## 平台状态
-
-- Android
-  - 主力平台，功能最完整
-  - 已验证 APK 构建、提醒、小组件、教务导入
-- Windows
-  - 已验证 Release 构建
-  - 支持主窗口 / 小窗模式切换
-- iOS
-  - Flutter 主体功能可运行
-  - WidgetKit 需要在 Xcode 内单独补全扩展
-- Web
-  - 基础页面可运行
-  - 系统级提醒、小组件能力受平台限制
-- OpenHarmony / HarmonyOS
-  - 需要 OpenHarmony Flutter 工具链
-  - 不能直接用 upstream stable Flutter 构建
+## 平台支持
+目前 NWPU Course Monitor 已对Android和Windows平台进行了适配和验证，同时保留了iOS、Web和OpenHarmony方向的适配入口，未来将继续完善这些平台的支持，目前OpenHarmony 端的适配开发已经开始。
 
 ## 快速开始
 
@@ -181,8 +172,4 @@ NWPU_COURSE_MONITOR/
 
 - `docs/references/soaring-schedule/`
 
-这些文件仅作为解析流程和页面交互参考，不直接参与 Flutter 运行时。
-
-## 许可证
-
-MIT
+这些文件仅作为解析流程和页面交互参考，不直接参与 Flutter 运行。
