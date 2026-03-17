@@ -2,7 +2,7 @@
 *旨在让瓜大学子摆脱天天崩溃的神秘蓝色软件*
 
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Version: v1.0.2--develop](https://img.shields.io/badge/Version-v1.0.2--develop-blue.svg)](https://github.com/fantian-bilibili/NWPU_COURSE_MONITOR/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) [![Version: v1.0.2](https://img.shields.io/badge/Version-v1.0.2-blue.svg)](https://github.com/fantian-bilibili/NWPU_COURSE_MONITOR/releases)
 
 NWPU Course Monitor 是一款基于 Flutter 的多端课程表与成绩管理应用，面向西北工业大学课程导入、学期管理、成绩绑定、提醒通知和桌面/桌面组件展示场景。
 
