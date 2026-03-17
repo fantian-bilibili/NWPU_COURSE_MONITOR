@@ -104,7 +104,7 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
                           Text(
-                            '${DateFormat('M.d EEEE', 'zh_CN').format(today)} \u00b7 \u7b2c$weekIndex\u5468',
+                            '${DateFormat('M.d EEEE', 'zh_CN').format(today)} · 第$weekIndex周',
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(
                                   fontWeight: FontWeight.w800,
@@ -114,10 +114,10 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
                           const SizedBox(height: 2),
                           Text(
                             showTodayList
-                                ? '\u4eca\u65e5\u5269\u4f59 $remaining \u8282\u8bfe\uff08\u6309\u4f4f\u6b64\u533a\u57df\u53ef\u62d6\u52a8\uff09'
+                                ? '今日剩余 $remaining 节课（按住此区域可拖动）'
                                 : (allTodayDone
-                                      ? '\u4eca\u65e5\u8bfe\u7a0b\u5df2\u7ed3\u675f\uff08\u6309\u4f4f\u6b64\u533a\u57df\u53ef\u62d6\u52a8\uff09'
-                                      : '\u4eca\u65e5\u65e0\u8bfe\uff08\u6309\u4f4f\u6b64\u533a\u57df\u53ef\u62d6\u52a8\uff09'),
+                                      ? '今日课程已结束（按住此区域可拖动）'
+                                      : '今日无课（按住此区域可拖动）'),
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: dark ? const Color(0xCDD7E5F1) : null,
@@ -128,7 +128,7 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
                     ),
                     const SizedBox(width: 8),
                     IconButton.filledTonal(
-                      tooltip: '\u8fd4\u56de\u5b8c\u6574\u6a21\u5f0f',
+                      tooltip: '返回完整模式',
                       style: IconButton.styleFrom(
                         backgroundColor: dark ? const Color(0xCC314555) : null,
                         foregroundColor: dark ? const Color(0xFFF4F7FB) : null,
@@ -151,10 +151,7 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       if (showTodayList) ...<Widget>[
-                        const _SectionTitle(
-                          title: '\u4eca\u65e5\u8bfe\u7a0b',
-                          subtitle: '\u6309\u65f6\u95f4\u6392\u5e8f',
-                        ),
+                        const _SectionTitle(title: '今日课程', subtitle: '按时间排序'),
                         const SizedBox(height: 6),
                         _VerticalCapsules(
                           items: todayItems,
@@ -163,28 +160,19 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
                         ),
                       ] else ...<Widget>[
                         _SectionTitle(
-                          title: '\u4eca\u65e5\u8bfe\u7a0b',
-                          subtitle: allTodayDone
-                              ? '\u4eca\u65e5\u8bfe\u7a0b\u5df2\u5168\u90e8\u5b8c\u6210'
-                              : '\u4eca\u5929\u6ca1\u6709\u8bfe\u7a0b\u5b89\u6392',
+                          title: '今日课程',
+                          subtitle: allTodayDone ? '今日课程已全部完成' : '今天没有课程安排',
                         ),
                         const SizedBox(height: 8),
                         _CapsuleCard(
                           tone: const Color(0xFF7A8A9F),
-                          title: allTodayDone
-                              ? '\u4eca\u65e5\u8bfe\u7a0b\u5df2\u7ed3\u675f'
-                              : '\u4eca\u65e5\u65e0\u8bfe',
-                          meta: allTodayDone
-                              ? '\u8f9b\u82e6\u4e86\uff0c\u4eca\u5929\u8bfe\u7a0b\u5168\u90e8\u7ed3\u675f\u3002'
-                              : '\u4eca\u5929\u65e0\u8bfe\uff0c\u795d\u4f60\u5b66\u4e60\u987a\u5229\u3002',
+                          title: allTodayDone ? '今日课程已结束' : '今日无课',
+                          meta: allTodayDone ? '辛苦了，今天课程全部结束。' : '今天无课，祝你学习顺利。',
                           badge: null,
                         ),
                       ],
                       const SizedBox(height: 12),
-                      const _SectionTitle(
-                        title: '\u660e\u65e5\u8bfe\u7a0b',
-                        subtitle: '\u9884\u89c8\u660e\u5929\u7684\u6392\u8bfe',
-                      ),
+                      const _SectionTitle(title: '明日课程', subtitle: '预览明天的排课'),
                       const SizedBox(height: 6),
                       _VerticalCapsules(
                         items: tomorrowItems,
@@ -267,14 +255,7 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
     required CourseSession session,
     required AppSettings settings,
   }) {
-    final int? startMinutes = _periodStartMinutes(
-      settings: settings,
-      period: session.startPeriod,
-    );
-    if (startMinutes == null) {
-      return null;
-    }
-    return _dateAtMinutes(date, startMinutes);
+    return sessionStartAt(date: date, session: session, settings: settings);
   }
 
   DateTime? _sessionEndAt({
@@ -282,61 +263,7 @@ class _WindowsMiniSchedulePageState extends State<WindowsMiniSchedulePage> {
     required CourseSession session,
     required AppSettings settings,
   }) {
-    final int? nextPeriodMinutes = _periodStartMinutes(
-      settings: settings,
-      period: session.endPeriod + 1,
-    );
-    if (nextPeriodMinutes != null) {
-      return _dateAtMinutes(date, nextPeriodMinutes);
-    }
-    final DateTime? startAt = _sessionStartAt(
-      date: date,
-      session: session,
-      settings: settings,
-    );
-    if (startAt == null) {
-      return null;
-    }
-    final int periods = (session.endPeriod - session.startPeriod + 1).clamp(
-      1,
-      24,
-    );
-    return startAt.add(
-      Duration(minutes: periods * settings.periodDurationMinutes),
-    );
-  }
-
-  int? _periodStartMinutes({
-    required AppSettings settings,
-    required int period,
-  }) {
-    if (period <= 0) {
-      return null;
-    }
-    if (period - 1 < settings.periodStartTimes.length) {
-      final int? fromSetting = timeTextToMinutes(
-        settings.periodStartTimes[period - 1],
-      );
-      if (fromSetting != null) {
-        return fromSetting;
-      }
-    }
-    final int? dayStart = timeTextToMinutes(settings.dayStartTime);
-    if (dayStart == null) {
-      return null;
-    }
-    return dayStart + (period - 1) * settings.periodDurationMinutes;
-  }
-
-  DateTime _dateAtMinutes(DateTime date, int minutesOfDay) {
-    final int safeMinutes = minutesOfDay.clamp(0, 24 * 60 - 1);
-    return DateTime(
-      date.year,
-      date.month,
-      date.day,
-      safeMinutes ~/ 60,
-      safeMinutes % 60,
-    );
+    return sessionEndAt(date: date, session: session, settings: settings);
   }
 }
 
@@ -388,7 +315,7 @@ class _VerticalCapsules extends StatelessWidget {
         blur: 16,
         radius: 14,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-        child: const Text('\u6682\u65e0\u8bfe\u7a0b'),
+        child: const Text('暂无课程'),
       );
     }
 
@@ -406,7 +333,7 @@ class _VerticalCapsules extends StatelessWidget {
           tone: tone,
           title: _truncate(item.course.name, 20),
           meta:
-              '${_formatRange(item)}  ${_truncate(item.course.location.isEmpty ? '\u5730\u70b9\u5f85\u5b9a' : item.course.location, 16)}'
+              '${_formatRange(item)}  ${_truncate(item.course.location.isEmpty ? '地点待定' : item.course.location, 16)}'
               '${item.course.teacher.trim().isEmpty ? '' : '  ${_truncate(firstTeacher(item.course.teacher), 8)}'}',
           badge: showStatus ? _statusLabel(item.status) : null,
         ),
@@ -420,7 +347,7 @@ class _VerticalCapsules extends StatelessWidget {
       children.add(const SizedBox(height: 7));
       children.add(
         Text(
-          '\u7b49${items.length - visible}\u8282\u8bfe',
+          '等${items.length - visible}节课',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );
@@ -432,7 +359,7 @@ class _VerticalCapsules extends StatelessWidget {
     if (item.startAt != null && item.endAt != null) {
       return '${_hm(item.startAt!)}-${_hm(item.endAt!)}';
     }
-    return '${item.session.startPeriod}-${item.session.endPeriod}\u8282';
+    return '${item.session.startPeriod}-${item.session.endPeriod}节';
   }
 
   String _hm(DateTime value) {
@@ -442,9 +369,9 @@ class _VerticalCapsules extends StatelessWidget {
   }
 
   String _statusLabel(_MiniCourseStatus status) => switch (status) {
-    _MiniCourseStatus.done => '\u5df2\u4e0b\u8bfe',
-    _MiniCourseStatus.live => '\u4e0a\u8bfe\u4e2d',
-    _MiniCourseStatus.upcoming => '\u672a\u4e0a\u8bfe',
+    _MiniCourseStatus.done => '已下课',
+    _MiniCourseStatus.live => '上课中',
+    _MiniCourseStatus.upcoming => '未上课',
   };
 
   String _truncate(String text, int maxChars) {

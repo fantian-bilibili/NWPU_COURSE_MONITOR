@@ -10,6 +10,8 @@ import '../../state/app_state.dart';
 import '../widgets/frosted_panel.dart';
 import 'jwxt_import_webview_page.dart';
 
+enum _ImportMode { merge, replace }
+
 class ImportPage extends StatefulWidget {
   const ImportPage({super.key, required this.appState});
 
@@ -20,9 +22,11 @@ class ImportPage extends StatefulWidget {
 }
 
 class _ImportPageState extends State<ImportPage> {
-  bool _replaceExisting = false;
+  _ImportMode _importMode = _ImportMode.merge;
   bool _applySettingsOnImport = true;
   bool _includeSettingsInJsonExport = true;
+
+  bool get _replaceExisting => _importMode == _ImportMode.replace;
 
   bool get _mobileWebImportSupported =>
       !kIsWeb &&
@@ -32,53 +36,13 @@ class _ImportPageState extends State<ImportPage> {
   @override
   Widget build(BuildContext context) {
     final AppState state = widget.appState;
-    final List<_ImportAction> actions = <_ImportAction>[
-      if (_mobileWebImportSupported)
-        _ImportAction(
-          icon: Icons.download_for_offline_outlined,
-          title: '手机端一键导入',
-          description: '登录教务后进入课表页，点击提取并写入当前学期。',
-          onTap: _startWebViewImport,
-        ),
-      _ImportAction(
-        icon: Icons.file_open_outlined,
-        title: '导入当前学期 JSON/CSV',
-        description: '导入到当前选中的学期，可选择合并或覆盖。',
-        onTap: _pickAndImportCurrentSemesterFile,
-      ),
-      _ImportAction(
-        icon: Icons.file_download_outlined,
-        title: '导出当前学期 JSON',
-        description: '仅导出当前学期的课程和成绩。',
-        onTap: () => _exportCurrentSemester(json: true),
-      ),
-      _ImportAction(
-        icon: Icons.table_rows_outlined,
-        title: '导出当前学期 CSV',
-        description: '适合在电脑表格软件中查看和编辑。',
-        onTap: () => _exportCurrentSemester(json: false),
-      ),
-      _ImportAction(
-        icon: Icons.cloud_upload_outlined,
-        title: '导入全部学期 JSON',
-        description: '恢复完整学期数据（含学期列表、课程、成绩）。',
-        onTap: _pickAndImportAllSemestersFile,
-      ),
-      _ImportAction(
-        icon: Icons.ios_share_outlined,
-        title: '一键导出全部学期',
-        description: '生成完整备份 JSON，便于跨设备迁移。',
-        onTap: _exportAllSemestersJson,
-      ),
-    ];
-
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      padding: EdgeInsets.fromLTRB(16, 10, 16, _pageBottomInset(context)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(
-            '导入导出',
+            '导入与导出',
             style: Theme.of(
               context,
             ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
@@ -88,61 +52,221 @@ class _ImportPageState extends State<ImportPage> {
             '当前学期：${state.currentSemester.name}',
             style: Theme.of(context).textTheme.bodyMedium,
           ),
-          const SizedBox(height: 8),
-          FrostedPanel(
-            enabled: state.settings.frostedCards,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('导入时覆盖现有数据'),
-                subtitle: const Text('关闭时合并去重，开启时直接替换。'),
-                value: _replaceExisting,
-                onChanged: (bool value) {
-                  setState(() => _replaceExisting = value);
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          FrostedPanel(
-            enabled: state.settings.frostedCards,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: <Widget>[
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('导入时应用作息设置'),
-                    subtitle: const Text('JSON 包含作息与提醒参数时，同步到当前设备。'),
-                    value: _applySettingsOnImport,
-                    onChanged: (bool value) {
-                      setState(() => _applySettingsOnImport = value);
-                    },
-                  ),
-                  const Divider(height: 1),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('JSON 导出包含作息设置'),
-                    subtitle: const Text('CSV 仍仅导出课程与成绩，不包含作息设置。'),
-                    value: _includeSettingsInJsonExport,
-                    onChanged: (bool value) {
-                      setState(() => _includeSettingsInJsonExport = value);
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          FrostedPanel(
-            enabled: state.settings.frostedCards,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: _ActionGrid(actions: actions),
-            ),
-          ),
+          const SizedBox(height: 10),
+          _buildImportConfigPanel(state),
+          const SizedBox(height: 10),
+          _buildTimetableImportPanel(state),
+          const SizedBox(height: 10),
+          _buildGradeImportPanel(state),
+          const SizedBox(height: 10),
+          _buildBackupPanel(state),
         ],
+      ),
+    );
+  }
+
+  Widget _buildImportConfigPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('导入设置', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 10),
+            SegmentedButton<_ImportMode>(
+              segments: const <ButtonSegment<_ImportMode>>[
+                ButtonSegment<_ImportMode>(
+                  value: _ImportMode.merge,
+                  icon: Icon(Icons.merge_type_outlined),
+                  label: Text('合并去重'),
+                ),
+                ButtonSegment<_ImportMode>(
+                  value: _ImportMode.replace,
+                  icon: Icon(Icons.content_cut_outlined),
+                  label: Text('覆盖替换'),
+                ),
+              ],
+              selected: <_ImportMode>{_importMode},
+              onSelectionChanged: (Set<_ImportMode> value) {
+                setState(() => _importMode = value.first);
+              },
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _replaceExisting
+                  ? '当前导入模式：使用新数据完整替换目标学期内容。'
+                  : '当前导入模式：在保留原数据的基础上合并去重。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 6),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('导入时同步作息与提醒设置'),
+              subtitle: const Text('当 JSON 包含设置项时，将作息和提醒策略一起恢复。'),
+              value: _applySettingsOnImport,
+              onChanged: (bool value) {
+                setState(() => _applySettingsOnImport = value);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimetableImportPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('课表导入', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '这里只处理课程表。手机端教务导入、ICS、JSON、CSV 都归在这一组。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            if (_mobileWebImportSupported)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _startWebViewImport,
+                  icon: const Icon(Icons.language_outlined),
+                  label: const Text('手机端一键教务导入'),
+                ),
+              ),
+            if (_mobileWebImportSupported) const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _pickAndImportCurrentSemesterFile,
+                icon: const Icon(Icons.file_open_outlined),
+                label: const Text('导入当前学期文件（JSON / CSV / ICS）'),
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _pickAndImportAllSemestersFile,
+                icon: const Icon(Icons.cloud_upload_outlined),
+                label: const Text('导入全部学期备份（JSON）'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGradeImportPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('成绩导入', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '这里处理成绩导入。支持 Excel 成绩单，也支持手机端教务成绩一键提取。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            if (_mobileWebImportSupported)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.tonalIcon(
+                  onPressed: _startGradeWebViewImport,
+                  icon: const Icon(Icons.school_outlined),
+                  label: const Text('手机端一键教务成绩导入'),
+                ),
+              ),
+            if (_mobileWebImportSupported) const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.tonalIcon(
+                onPressed: _pickAndImportGradeExcel,
+                icon: const Icon(Icons.table_view_rounded),
+                label: const Text('导入成绩 Excel（XLSX）'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBackupPanel(AppState state) {
+    return FrostedPanel(
+      enabled: state.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('备份与迁移', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 4),
+            Text(
+              '整包迁移和导出都放在这里。推荐整机迁移时优先使用 JSON 备份。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _pickAndImportAllSemestersFile,
+                icon: const Icon(Icons.cloud_upload_outlined),
+                label: const Text('导入全部学期备份（JSON）'),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('JSON 导出包含作息与提醒设置'),
+              subtitle: const Text('CSV 仅包含课程和成绩，不包含设置项。'),
+              value: _includeSettingsInJsonExport,
+              onChanged: (bool value) {
+                setState(() => _includeSettingsInJsonExport = value);
+              },
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => _exportCurrentSemester(json: true),
+                    icon: const Icon(Icons.data_object_outlined),
+                    label: const Text('导出当前学期 JSON'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    onPressed: () => _exportCurrentSemester(json: false),
+                    icon: const Icon(Icons.table_rows_outlined),
+                    label: const Text('导出当前学期 CSV'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _exportAllSemestersJson,
+                icon: const Icon(Icons.ios_share_outlined),
+                label: const Text('一键导出全部学期（JSON）'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -151,7 +275,7 @@ class _ImportPageState extends State<ImportPage> {
     final FilePickerResult? picked = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.custom,
-      allowedExtensions: const <String>['json', 'csv'],
+      allowedExtensions: const <String>['json', 'csv', 'ics'],
     );
     if (picked == null ||
         picked.files.isEmpty ||
@@ -168,10 +292,58 @@ class _ImportPageState extends State<ImportPage> {
               replaceExisting: _replaceExisting,
               applySettings: _applySettingsOnImport,
             );
-        _showMessage('当前学期导入完成：${result.courses} 门课程，${result.grades} 条成绩。');
+        _showMessage('导入完成：${result.courses} 门课程，${result.grades} 条成绩。');
       });
     } catch (error) {
       _showMessage('导入失败：${_friendlyError(error)}');
+    }
+  }
+
+  Future<void> _pickAndImportGradeExcel() async {
+    final FilePickerResult? picked = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+      type: FileType.custom,
+      allowedExtensions: const <String>['xlsx', 'xls'],
+    );
+    if (picked == null ||
+        picked.files.isEmpty ||
+        picked.files.single.path == null) {
+      return;
+    }
+
+    final String path = picked.files.single.path!;
+    try {
+      final ExcelGradeParseResult preview = await widget.appState
+          .previewGradeExcel(path);
+      if (!mounted) {
+        return;
+      }
+
+      final Map<String, String>?
+      semesterMapping = await _showSemesterMappingDialog(
+        preview,
+        title: '匹配 Excel 学期',
+        helperText:
+            '识别到 ${preview.rows.length} 条成绩，涉及 ${preview.sourceSemesters.length} 个学期。',
+      );
+      if (semesterMapping == null) {
+        return;
+      }
+
+      final ExcelGradeImportResult result = await widget.appState.runWithBusy(
+        () => widget.appState.importGradesFromExcel(
+          rows: preview.rows,
+          semesterMapping: semesterMapping,
+        ),
+      );
+      _showMessage(
+        '成绩导入完成：写入 ${result.appliedCount} 条，跳过 ${result.skippedMissingCourses.length} 条。',
+      );
+      if (result.skippedMissingCourses.isNotEmpty && mounted) {
+        await _showSkippedCourseDialog(result);
+      }
+    } catch (error) {
+      _showMessage('Excel 导入失败：${_friendlyError(error)}');
     }
   }
 
@@ -198,8 +370,10 @@ class _ImportPageState extends State<ImportPage> {
               applySettings: _applySettingsOnImport,
             );
         _showMessage(
-          '全学期导入完成：${result.semesters} 个学期，'
-          '${result.courses} 门课程，${result.grades} 条成绩。',
+          '全学期导入完成：'
+          '${result.semesters} 个学期，'
+          '${result.courses} 门课程，'
+          '${result.grades} 条成绩。',
         );
       });
     } catch (error) {
@@ -215,7 +389,10 @@ class _ImportPageState extends State<ImportPage> {
                 includeSettings: _includeSettingsInJsonExport,
               )
             : await widget.appState.exportCsv();
-        await _shareOrShowPath(file, fallbackPrefix: '导出成功');
+        await _shareOrShowPath(
+          file,
+          fallbackPrefix: json ? '已导出当前学期 JSON' : '已导出当前学期 CSV',
+        );
       });
     } catch (error) {
       _showMessage('导出失败：${_friendlyError(error)}');
@@ -228,7 +405,7 @@ class _ImportPageState extends State<ImportPage> {
         final File file = await widget.appState.exportAllSemestersJson(
           includeSettings: _includeSettingsInJsonExport,
         );
-        await _shareOrShowPath(file, fallbackPrefix: '全学期导出成功');
+        await _shareOrShowPath(file, fallbackPrefix: '已导出全部学期 JSON');
       });
     } catch (error) {
       _showMessage('导出失败：${_friendlyError(error)}');
@@ -241,7 +418,7 @@ class _ImportPageState extends State<ImportPage> {
   }) async {
     try {
       await SharePlus.instance.share(
-        ShareParams(files: <XFile>[XFile(file.path)], text: '课程表备份文件'),
+        ShareParams(files: <XFile>[XFile(file.path)], text: '课表备份文件'),
       );
     } catch (_) {
       _showMessage('$fallbackPrefix：${file.path}');
@@ -266,29 +443,74 @@ class _ImportPageState extends State<ImportPage> {
 
     try {
       await widget.appState.runWithBusy(() async {
-        final String pageHtml = (payload['pageHtml'] as String? ?? '').trim();
-        AutoImportResult result;
-        if (pageHtml.isNotEmpty) {
-          result = await widget.appState.importFromTimetableHtmlSnapshot(
-            html: pageHtml,
-            replaceExisting: _replaceExisting,
-          );
-          if (result.courses.isEmpty) {
-            result = await widget.appState.importFromExtractedPayload(
+        final AutoImportResult result = await widget.appState
+            .importFromJwxtCapture(
               payload: payload,
               replaceExisting: _replaceExisting,
             );
-          }
-        } else {
-          result = await widget.appState.importFromExtractedPayload(
-            payload: payload,
-            replaceExisting: _replaceExisting,
-          );
-        }
         _showMessage(result.messages.join(' '));
       });
     } catch (error) {
       _showMessage('导入失败：${_friendlyError(error)}');
+    }
+  }
+
+  Future<void> _startGradeWebViewImport() async {
+    if (!_mobileWebImportSupported) {
+      return;
+    }
+
+    final Map<String, dynamic>? payload = await Navigator.of(context)
+        .push<Map<String, dynamic>>(
+          MaterialPageRoute<Map<String, dynamic>>(
+            builder: (_) =>
+                const JwxtImportWebViewPage(mode: JwxtImportMode.grade),
+            fullscreenDialog: true,
+          ),
+        );
+    if (payload == null) {
+      return;
+    }
+
+    final String pageHtml = (payload['pageHtml'] as String? ?? '').trim();
+    if (pageHtml.isEmpty) {
+      _showMessage('未提取到成绩页面内容，请确认已经打开“成绩信息/学生成绩单”页面。');
+      return;
+    }
+
+    try {
+      final ExcelGradeParseResult preview = widget.appState
+          .previewGradeHtmlSnapshot(pageHtml);
+      if (preview.rows.isEmpty) {
+        _showMessage('未识别到成绩，请确认成绩表已经完全加载。');
+        return;
+      }
+
+      final Map<String, String>?
+      semesterMapping = await _showSemesterMappingDialog(
+        preview,
+        title: '匹配教务成绩学期',
+        helperText:
+            '识别到 ${preview.rows.length} 条成绩，涉及 ${preview.sourceSemesters.length} 个学期。',
+      );
+      if (semesterMapping == null) {
+        return;
+      }
+
+      final ExcelGradeImportResult result = await widget.appState.runWithBusy(
+        () => widget.appState.importGradesFromExcel(
+          rows: preview.rows,
+          semesterMapping: semesterMapping,
+        ),
+      );
+      _showMessage(
+        '教务成绩导入完成：写入 ${result.appliedCount} 条，跳过 ${result.skippedMissingCourses.length} 条。',
+      );
+      if (result.skippedMissingCourses.isNotEmpty && mounted) {
+        await _showSkippedCourseDialog(result);
+      }
+    } catch (error) {
+      _showMessage('教务成绩导入失败：${_friendlyError(error)}');
     }
   }
 
@@ -306,102 +528,167 @@ class _ImportPageState extends State<ImportPage> {
     }
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
-}
 
-class _ImportAction {
-  const _ImportAction({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.onTap,
-  });
+  Future<Map<String, String>?> _showSemesterMappingDialog(
+    ExcelGradeParseResult preview, {
+    required String title,
+    required String helperText,
+  }) {
+    final AppState state = widget.appState;
+    final Map<String, String> mapping = <String, String>{
+      for (final String semester in preview.sourceSemesters)
+        semester: _guessSemesterMapping(state, semester),
+    };
 
-  final IconData icon;
-  final String title;
-  final String description;
-  final VoidCallback onTap;
-}
+    return showDialog<Map<String, String>>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder:
+              (BuildContext context, void Function(void Function()) setState) {
+                return AlertDialog(
+                  title: Text(title),
+                  content: SizedBox(
+                    width: 460,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            helperText,
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                          const SizedBox(height: 12),
+                          for (final String sourceSemester
+                              in preview.sourceSemesters) ...<Widget>[
+                            Text(
+                              sourceSemester,
+                              style: Theme.of(context).textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 6),
+                            InputDecorator(
+                              decoration: const InputDecoration(
+                                labelText: '导入到哪个课表学期',
+                                isDense: true,
+                              ),
+                              child: DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: mapping[sourceSemester],
+                                  isExpanded: true,
+                                  items: state.semesters
+                                      .map(
+                                        (SemesterInfo semester) =>
+                                            DropdownMenuItem<String>(
+                                              value: semester.id,
+                                              child: Text(
+                                                semester.name,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                      )
+                                      .toList(),
+                                  onChanged: (String? value) {
+                                    if (value == null) {
+                                      return;
+                                    }
+                                    setState(
+                                      () => mapping[sourceSemester] = value,
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                  actions: <Widget>[
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed:
+                          mapping.values.any(
+                            (String value) => value.trim().isEmpty,
+                          )
+                          ? null
+                          : () => Navigator.of(
+                              context,
+                            ).pop(Map<String, String>.from(mapping)),
+                      child: const Text('开始导入'),
+                    ),
+                  ],
+                );
+              },
+        );
+      },
+    );
+  }
 
-class _ActionGrid extends StatelessWidget {
-  const _ActionGrid({required this.actions});
+  String _guessSemesterMapping(AppState state, String sourceSemester) {
+    final String normalizedSource = sourceSemester.trim().toLowerCase();
+    for (final SemesterInfo semester in state.semesters) {
+      if (semester.name.trim().toLowerCase() == normalizedSource) {
+        return semester.id;
+      }
+    }
+    for (final SemesterInfo semester in state.semesters) {
+      final String target = semester.name.trim().toLowerCase();
+      if (target.contains(normalizedSource) ||
+          normalizedSource.contains(target)) {
+        return semester.id;
+      }
+    }
+    return state.currentSemester.id;
+  }
 
-  final List<_ImportAction> actions;
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (BuildContext context, BoxConstraints constraints) {
-        final double width = constraints.maxWidth;
-        final int columns = width >= 900
-            ? 3
-            : width >= 620
-            ? 2
-            : 1;
-        final double itemWidth = (width - (columns - 1) * 12) / columns;
-
-        return Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: actions
-              .map(
-                (_ImportAction action) => SizedBox(
-                  width: itemWidth,
-                  child: _ActionCard(action: action),
-                ),
-              )
-              .toList(),
+  Future<void> _showSkippedCourseDialog(ExcelGradeImportResult result) {
+    final List<String> preview = result.skippedMissingCourses.take(12).toList();
+    final int more = result.skippedMissingCourses.length - preview.length;
+    return showDialog<void>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('以下成绩已跳过'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const Text('这些课程在对应学期中不存在，因此无法绑定成绩：'),
+                  const SizedBox(height: 10),
+                  for (final String item in preview)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text('• $item'),
+                    ),
+                  if (more > 0) Text('……以及另外 $more 条'),
+                ],
+              ),
+            ),
+          ),
+          actions: <Widget>[
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('知道了'),
+            ),
+          ],
         );
       },
     );
   }
 }
 
-class _ActionCard extends StatelessWidget {
-  const _ActionCard({required this.action});
-
-  final _ImportAction action;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 164,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.58),
-        border: Border.all(
-          color: Theme.of(
-            context,
-          ).colorScheme.outlineVariant.withValues(alpha: 0.45),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(action.icon),
-          const SizedBox(height: 8),
-          Text(
-            action.title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: Text(
-              action.description,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.tonal(
-              onPressed: action.onTap,
-              child: const Text('执行'),
-            ),
-          ),
-        ],
-      ),
-    );
+double _pageBottomInset(BuildContext context) {
+  final bool mobile = MediaQuery.sizeOf(context).width < 720;
+  if (!mobile) {
+    return 12;
   }
+  return MediaQuery.paddingOf(context).bottom + 108;
 }

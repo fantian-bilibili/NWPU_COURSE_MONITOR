@@ -97,20 +97,24 @@ class TeachingSystemImportService {
         'title',
       ]);
       final String code = _firstString(row, <String>['code', 'courseCode']);
-      final String scheduleText = _firstString(row, <String>[
+      String scheduleText = _firstString(row, <String>[
         'scheduleText',
         'schedule',
         'timeText',
         'timeDesc',
       ]);
-      if (name.isEmpty || scheduleText.isEmpty) {
+      if (scheduleText.isEmpty) {
+        scheduleText = _firstString(row, <String>['rowText', 'arrangeText']);
+      }
+      if (name.isEmpty) {
         continue;
       }
 
       final String teacher = _normalizeTeacher(
         _firstString(row, <String>['teacher', 'teacherName', 'jsxm']),
       );
-      if (_isOnlineCourse(name, teacher, scheduleText)) {
+      final bool isOnline = _isOnlineCourse(name, teacher, scheduleText);
+      if (scheduleText.isEmpty && !isOnline) {
         continue;
       }
 
@@ -149,11 +153,15 @@ class TeachingSystemImportService {
           location: location,
           scheduleText: scheduleText,
           dataSemester: _firstString(row, <String>['dataSemester', 'semester']),
+          isOnline: isOnline,
         ),
       );
     }
 
     final List<Course> courses = _buildCoursesFromRaw(rawCourses);
+    final int onlineCount = courses
+        .where((Course course) => course.isOnline)
+        .length;
     final List<dynamic> semesterList =
         (payload['semesters'] as List<dynamic>?) ?? <dynamic>[];
     final int semesterCount = semesterList
@@ -168,7 +176,8 @@ class TeachingSystemImportService {
 
     final List<String> messages = <String>[
       if (semesterCount > 0) '识别到 $semesterCount 个学期数据。',
-      '页面提取到 ${rawCourses.length} 条课程，成功导入 ${courses.length} 门课程。',
+      '页面提取到 ${rawCourses.length} 条课程，成功导入 ${courses.length} 门课程'
+          '${onlineCount > 0 ? '（含 $onlineCount 门网课）' : ''}。',
       if (courses.isEmpty) '未识别到可导入课程，请确认当前页面是“我的课表-全部课程”。',
     ];
 
@@ -189,6 +198,16 @@ class TeachingSystemImportService {
         if (courses.isEmpty) '未识别到课程，请确认导入的是“我的课表-全部课程”页面源码。',
       ],
     );
+  }
+
+  ExcelGradeParseResult previewGradeHtmlSnapshot(String html) {
+    final List<ExcelGradeRow> rows = _parseGradeRowsFromHtml(html);
+    final List<String> sourceSemesters = rows
+        .map((ExcelGradeRow row) => row.sourceSemesterName.trim())
+        .where((String value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    return ExcelGradeParseResult(rows: rows, sourceSemesters: sourceSemesters);
   }
 
   List<Course> _parseTimetable(String body) {
@@ -340,9 +359,7 @@ class TeachingSystemImportService {
       }
 
       final String teacher = _normalizeTeacher(teacherRaw);
-      if (_isOnlineCourse(courseName, teacher, scheduleText)) {
-        continue;
-      }
+      final bool isOnline = _isOnlineCourse(courseName, teacher, scheduleText);
 
       rawCourses.add(
         _RawNwpuCourse(
@@ -353,6 +370,7 @@ class TeachingSystemImportService {
           location: location,
           scheduleText: scheduleText,
           dataSemester: dataSemester,
+          isOnline: isOnline,
         ),
       );
     }
@@ -366,14 +384,31 @@ class TeachingSystemImportService {
 
     final Map<String, Course> merged = <String, Course>{};
     for (final _RawNwpuCourse raw in rawCourses) {
-      final List<_ParsedSlot> slots = _parseScheduleText(raw.scheduleText);
-      if (slots.isEmpty) {
-        continue;
-      }
       final String normalizedLocation = _sanitizeLocationCandidate(
         raw.location,
         courseCode: raw.code,
       );
+      if (raw.isOnline) {
+        final String key =
+            '${raw.name}|${raw.teacher}|${raw.code}|${raw.dataSemester}|online';
+        merged[key] = Course(
+          name: raw.name,
+          semesterId: raw.dataSemester,
+          code: raw.code,
+          teacher: raw.teacher,
+          location: normalizedLocation,
+          credit: raw.credits,
+          colorValue: _colorByName(raw.name),
+          courseType: CourseType.online,
+          sessions: const <CourseSession>[],
+        );
+        continue;
+      }
+
+      final List<_ParsedSlot> slots = _parseScheduleText(raw.scheduleText);
+      if (slots.isEmpty) {
+        continue;
+      }
 
       final List<CourseSession> sessions = <CourseSession>[];
       for (final _ParsedSlot slot in slots) {
@@ -413,6 +448,7 @@ class TeachingSystemImportService {
           location: normalizedLocation,
           credit: raw.credits,
           colorValue: _colorByName(raw.name),
+          courseType: CourseType.scheduled,
           sessions: sessions,
         );
       } else {
@@ -572,6 +608,124 @@ class TeachingSystemImportService {
       );
     }
     return grades;
+  }
+
+  List<ExcelGradeRow> _parseGradeRowsFromHtml(String html) {
+    final RegExp semesterBlockRegex = RegExp(
+      r'<h3[^>]*class="[^"]*\bsemesterName\b[^"]*"[^>]*>([\s\S]*?)</h3>'
+      r'[\s\S]*?<table[^>]*class="[^"]*\bstudent-grade-table\b[^"]*"[^>]*>'
+      r'[\s\S]*?<tbody>([\s\S]*?)</tbody>',
+      caseSensitive: false,
+    );
+    final RegExp rowRegex = RegExp(
+      r'<tr[^>]*>([\s\S]*?)</tr>',
+      caseSensitive: false,
+    );
+    final RegExp tdRegex = RegExp(
+      r'<td[^>]*>([\s\S]*?)</td>',
+      caseSensitive: false,
+    );
+
+    final List<ExcelGradeRow> rows = <ExcelGradeRow>[];
+    for (final RegExpMatch blockMatch in semesterBlockRegex.allMatches(html)) {
+      final String semesterName = _stripHtml(blockMatch.group(1) ?? '').trim();
+      final String tbodyHtml = blockMatch.group(2) ?? '';
+      if (semesterName.isEmpty || tbodyHtml.trim().isEmpty) {
+        continue;
+      }
+
+      for (final RegExpMatch rowMatch in rowRegex.allMatches(tbodyHtml)) {
+        final String rowHtml = rowMatch.group(1) ?? '';
+        final List<String> cells = tdRegex
+            .allMatches(rowHtml)
+            .map((RegExpMatch match) => match.group(1) ?? '')
+            .toList();
+        if (cells.length < 4) {
+          continue;
+        }
+
+        final String infoCell = cells[0];
+        final String courseName = _extractGradeCourseName(infoCell);
+        final String courseCode = _extractGradeCourseCode(infoCell);
+        if (courseName.isEmpty) {
+          continue;
+        }
+
+        final double credit = _parseDouble(_stripHtml(cells[1])) ?? 0;
+        final String gradePointText = _stripHtml(cells[2]).trim();
+        final String scoreText = _stripHtml(cells[3]).trim();
+        final GradeResultType resultType = _parseGradeResultType(
+          scoreText: scoreText,
+          gradePointText: gradePointText,
+        );
+
+        rows.add(
+          ExcelGradeRow(
+            sheetName: '教务系统',
+            sourceSemesterName: semesterName,
+            courseName: courseName,
+            courseCode: courseCode,
+            credit: credit,
+            rawResult: scoreText.isNotEmpty ? scoreText : gradePointText,
+            resultType: resultType,
+            score: resultType == GradeResultType.gpa
+                ? _parseDouble(scoreText)
+                : null,
+            gradePoint: resultType == GradeResultType.gpa
+                ? _parseDouble(gradePointText)
+                : null,
+          ),
+        );
+      }
+    }
+
+    return rows;
+  }
+
+  String _extractGradeCourseName(String cellHtml) {
+    final RegExp primaryNameRegex = RegExp(
+      r'<div[^>]*class="[^"]*\bcourse-name\b[^"]*"[^>]*>\s*([^<]+)',
+      caseSensitive: false,
+    );
+    final String primary = _stripHtml(
+      primaryNameRegex.firstMatch(cellHtml)?.group(1) ?? '',
+    ).trim();
+    if (primary.isNotEmpty) {
+      return primary;
+    }
+    return _stripHtml(cellHtml).trim();
+  }
+
+  String _extractGradeCourseCode(String cellHtml) {
+    final RegExp courseCodeRegex = RegExp(
+      r'title="课程代码"[^>]*>([\s\S]*?)</span>',
+      caseSensitive: false,
+    );
+    final String courseCode = _stripHtml(
+      courseCodeRegex.firstMatch(cellHtml)?.group(1) ?? '',
+    ).trim();
+    return courseCode;
+  }
+
+  GradeResultType _parseGradeResultType({
+    required String scoreText,
+    required String gradePointText,
+  }) {
+    final String normalizedScore = scoreText.trim().toUpperCase();
+    final String normalizedGradePoint = gradePointText.trim().toUpperCase();
+    if (normalizedScore == 'NP' || normalizedScore == '不通过') {
+      return GradeResultType.noPass;
+    }
+    if (normalizedScore == 'P' || normalizedScore == '通过') {
+      return GradeResultType.pass;
+    }
+    if (normalizedGradePoint == 'NP') {
+      return GradeResultType.noPass;
+    }
+    if (normalizedGradePoint == 'P') {
+      return GradeResultType.pass;
+    }
+    return GradeResultType.gpa;
   }
 
   List<_ParsedSlot> _parseScheduleText(String scheduleText) {
@@ -1117,6 +1271,7 @@ class TeachingSystemImportService {
       '网络课程',
       '网络',
       'mooc',
+      '不排课',
     ];
     final String textToCheck = '$name $teacher $scheduleText'.toLowerCase();
     return onlineKeywords.any(
@@ -1206,6 +1361,13 @@ class TeachingSystemImportService {
       'jxcdmc',
       'room',
     ]);
+    final String scheduleText = _firstString(item, <String>[
+      'timeText',
+      'timeDesc',
+      'sjms',
+      'scheduleText',
+      'arrangeText',
+    ]);
     final int? weekday = _parseWeekday(
       _firstValue(item, <String>[
         'weekday',
@@ -1226,8 +1388,9 @@ class TeachingSystemImportService {
     );
     final double credit =
         _parseDouble(_firstValue(item, <String>['credit', 'xf'])) ?? 0;
+    final bool isOnline = _isOnlineCourse(name, teacher, scheduleText);
 
-    if (weekday == null) {
+    if (weekday == null && !isOnline) {
       return null;
     }
 
@@ -1239,16 +1402,19 @@ class TeachingSystemImportService {
       location: location,
       credit: credit,
       colorValue: _colorByName(name),
-      sessions: <CourseSession>[
-        CourseSession(
-          weekday: weekday,
-          startPeriod: section.start,
-          endPeriod: section.end,
-          startWeek: weeks.startWeek,
-          endWeek: weeks.endWeek,
-          weekType: weeks.weekType,
-        ),
-      ],
+      courseType: isOnline ? CourseType.online : CourseType.scheduled,
+      sessions: isOnline
+          ? const <CourseSession>[]
+          : <CourseSession>[
+              CourseSession(
+                weekday: weekday!,
+                startPeriod: section.start,
+                endPeriod: section.end,
+                startWeek: weeks.startWeek,
+                endWeek: weeks.endWeek,
+                weekType: weeks.weekType,
+              ),
+            ],
     );
   }
 
@@ -1491,6 +1657,7 @@ class _RawNwpuCourse {
     required this.location,
     required this.scheduleText,
     required this.dataSemester,
+    required this.isOnline,
   });
 
   final String name;
@@ -1500,6 +1667,7 @@ class _RawNwpuCourse {
   final String location;
   final String scheduleText;
   final String dataSemester;
+  final bool isOnline;
 }
 
 class _ParsedSlot {

@@ -36,14 +36,14 @@ class WindowsDesktopService {
     }
   }
 
-  Future<bool> setAutoStart(bool enabled) async {
+  Future<bool> setAutoStart(bool enabled, {bool startMiniMode = false}) async {
     if (!Platform.isWindows) {
       return false;
     }
     try {
       final bool? applied = await _channel.invokeMethod<bool>(
         'setAutoStart',
-        <String, dynamic>{'enabled': enabled},
+        <String, dynamic>{'enabled': enabled, 'startMini': startMiniMode},
       );
       return applied ?? false;
     } on PlatformException {

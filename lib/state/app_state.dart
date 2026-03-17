@@ -69,6 +69,16 @@ class AppState extends ChangeNotifier {
     _courses.where((Course c) => c.semesterId == _currentSemesterId).toList(),
   );
 
+  List<Course> get scheduledCourses => List<Course>.unmodifiable(
+    courses
+        .where((Course course) => !course.isOnline && course.hasSchedule)
+        .toList(),
+  );
+
+  List<Course> get onlineCourses => List<Course>.unmodifiable(
+    courses.where((Course course) => course.isOnline).toList(),
+  );
+
   List<GradeEntry> get grades => List<GradeEntry>.unmodifiable(
     _grades
         .where((GradeEntry g) => g.semesterId == _currentSemesterId)
@@ -78,16 +88,21 @@ class AppState extends ChangeNotifier {
   List<Course> get allCourses => List<Course>.unmodifiable(_courses);
   List<GradeEntry> get allGrades => List<GradeEntry>.unmodifiable(_grades);
 
+  int get releasedGradeCount =>
+      grades.where((GradeEntry grade) => grade.isReleased).length;
+
   double get earnedCredits {
     return grades
-        .where((GradeEntry grade) => grade.counted)
+        .where((GradeEntry grade) => grade.countsTowardGpa)
         .fold<double>(0, (double sum, GradeEntry grade) => sum + grade.credit);
   }
 
   double get currentGpa {
     double weightedPoints = 0;
     double totalCredits = 0;
-    for (final GradeEntry grade in grades.where((GradeEntry g) => g.counted)) {
+    for (final GradeEntry grade in grades.where(
+      (GradeEntry g) => g.countsTowardGpa,
+    )) {
       final double? gpa = grade.finalGradePoint;
       if (gpa == null || grade.credit <= 0) {
         continue;
@@ -104,7 +119,9 @@ class AppState extends ChangeNotifier {
   double get weightedScore {
     double weightedTotal = 0;
     double totalCredits = 0;
-    for (final GradeEntry grade in grades.where((GradeEntry g) => g.counted)) {
+    for (final GradeEntry grade in grades.where(
+      (GradeEntry g) => g.countsTowardGpa,
+    )) {
       final double? score = grade.score;
       if (score == null || grade.credit <= 0) {
         continue;
@@ -151,7 +168,7 @@ class AppState extends ChangeNotifier {
       await _storageService.saveSettings(_settings);
       await _persistSemesterState();
     } catch (error) {
-      _emitStatus('初始化失败: $error');
+      _emitStatus('初始化失败：$error');
     } finally {
       _initialized = true;
       notifyListeners();
@@ -167,7 +184,7 @@ class AppState extends ChangeNotifier {
     try {
       return await action();
     } catch (error) {
-      _emitStatus('操作失败: $error');
+      _emitStatus('操作失败：$error');
       rethrow;
     } finally {
       _busyCount -= 1;
@@ -200,7 +217,7 @@ class AppState extends ChangeNotifier {
     await _persistSemesterState();
     await _resyncIntegrations();
     notifyListeners();
-    _emitStatus('已创建学期: ${semester.name}');
+    _emitStatus('已新建学期：${semester.name}');
   }
 
   Future<void> switchSemester(String semesterId) async {
@@ -219,7 +236,7 @@ class AppState extends ChangeNotifier {
     await _persistSemesterState();
     await _resyncIntegrations();
     notifyListeners();
-    _emitStatus('已切换到: ${currentSemester.name}');
+    _emitStatus('已切换到：${currentSemester.name}');
   }
 
   Future<void> updateSemester({
@@ -253,12 +270,39 @@ class AppState extends ChangeNotifier {
     await _persistSemesterState();
     await _resyncIntegrations();
     notifyListeners();
-    _emitStatus('学期已更新');
+    _emitStatus('学期信息已更新。');
+  }
+
+  Future<void> deleteSemester(String semesterId) async {
+    if (_semesters.length <= 1) {
+      throw Exception('至少需要保留一个学期。');
+    }
+    final int index = _semesters.indexWhere(
+      (SemesterInfo semester) => semester.id == semesterId,
+    );
+    if (index < 0) {
+      return;
+    }
+
+    final SemesterInfo deleting = _semesters[index];
+    _semesters.removeAt(index);
+    _courses.removeWhere((Course course) => course.semesterId == semesterId);
+    _grades.removeWhere((GradeEntry grade) => grade.semesterId == semesterId);
+
+    if (_currentSemesterId == semesterId) {
+      _currentSemesterId = _semesters.first.id;
+      _settings = _settings.copyWith(termStartMonday: currentTermStartMonday);
+      await _storageService.saveSettings(_settings);
+    }
+
+    await _persistData();
+    await _persistSemesterState();
+    _emitStatus('已删除学期：${deleting.name}');
   }
 
   List<Course> coursesForDate(DateTime date) {
     final DateTime day = DateTime(date.year, date.month, date.day);
-    final List<Course> result = courses
+    final List<Course> result = scheduledCourses
         .where(
           (Course course) => course.sessions.any(
             (CourseSession session) =>
@@ -304,7 +348,7 @@ class AppState extends ChangeNotifier {
 
     _courses = _dedupeCourses(_courses)..sort(_compareCourses);
     await _persistData();
-    _emitStatus(index >= 0 ? '课程已更新' : '课程已新增');
+    _emitStatus(index >= 0 ? '课程已更新。' : '课程已新增。');
   }
 
   Future<void> deleteCourse(String courseId) async {
@@ -316,7 +360,7 @@ class AppState extends ChangeNotifier {
     }
 
     await _persistData();
-    _emitStatus('课程已删除');
+    _emitStatus('课程已删除。');
   }
 
   Future<void> upsertGrade(GradeEntry grade) async {
@@ -330,7 +374,7 @@ class AppState extends ChangeNotifier {
 
     _grades = _dedupeGrades(_grades)..sort(_compareGrades);
     await _persistData();
-    _emitStatus(index >= 0 ? '成绩已更新' : '成绩已新增');
+    _emitStatus(index >= 0 ? '成绩已更新。' : '成绩已新增。');
   }
 
   Future<void> deleteGrade(String gradeId) async {
@@ -341,15 +385,36 @@ class AppState extends ChangeNotifier {
     }
 
     await _persistData();
-    _emitStatus('成绩已删除');
+    _emitStatus('成绩已删除。');
   }
 
   Future<void> setCourseGradePoint({
     required Course course,
     required double? gradePoint,
   }) async {
+    await setCourseGradeResult(
+      course: course,
+      resultType: gradePoint == null ? null : GradeResultType.gpa,
+      gradePoint: gradePoint,
+    );
+  }
+
+  Future<void> setCourseGradeResult({
+    required Course course,
+    required GradeResultType? resultType,
+    double? gradePoint,
+  }) async {
     final GradeEntry? existing = gradeForCourse(course);
-    if (gradePoint == null) {
+    if (resultType == null) {
+      if (existing != null) {
+        await deleteGrade(existing.id);
+      }
+      return;
+    }
+
+    if (resultType == GradeResultType.gpa &&
+        gradePoint == null &&
+        existing?.score == null) {
       if (existing != null) {
         await deleteGrade(existing.id);
       }
@@ -362,11 +427,87 @@ class AppState extends ChangeNotifier {
       semesterId: _currentSemesterId,
       courseName: course.name,
       credit: course.credit,
-      score: existing?.score,
-      gradePoint: gradePoint,
-      counted: true,
+      score: resultType == GradeResultType.gpa ? existing?.score : null,
+      gradePoint: resultType == GradeResultType.gpa ? gradePoint : null,
+      resultType: resultType,
+      counted: existing?.counted ?? true,
     );
     await upsertGrade(entry);
+  }
+
+  Future<ExcelGradeParseResult> previewGradeExcel(String path) {
+    return _importExportService.parseGradeExcel(path);
+  }
+
+  ExcelGradeParseResult previewGradeHtmlSnapshot(String html) {
+    return _teachingImportService.previewGradeHtmlSnapshot(html);
+  }
+
+  Future<ExcelGradeImportResult> importGradesFromExcel({
+    required List<ExcelGradeRow> rows,
+    required Map<String, String> semesterMapping,
+  }) async {
+    int appliedCount = 0;
+    final List<String> skippedMissingCourses = <String>[];
+
+    for (final ExcelGradeRow row in rows) {
+      final String targetSemesterId =
+          semesterMapping[row.sourceSemesterName]?.trim() ?? '';
+      if (targetSemesterId.isEmpty) {
+        continue;
+      }
+
+      final Course? matchedCourse = _matchCourseForExcelRow(
+        row: row,
+        semesterId: targetSemesterId,
+      );
+      if (matchedCourse == null) {
+        skippedMissingCourses.add(
+          row.courseCode.trim().isEmpty
+              ? '${row.sourceSemesterName} / ${row.courseName}'
+              : '${row.sourceSemesterName} / ${row.courseName} (${row.courseCode})',
+        );
+        continue;
+      }
+
+      final GradeEntry? existing = _gradeForCourseInSemester(
+        matchedCourse,
+        semesterId: targetSemesterId,
+      );
+      final GradeEntry next = GradeEntry(
+        id: existing?.id,
+        courseId: matchedCourse.id,
+        semesterId: targetSemesterId,
+        courseName: matchedCourse.name,
+        credit: matchedCourse.credit > 0 ? matchedCourse.credit : row.credit,
+        score: row.resultType == GradeResultType.gpa ? row.score : null,
+        gradePoint: row.resultType == GradeResultType.gpa
+            ? row.gradePoint
+            : null,
+        resultType: row.resultType,
+        counted: existing?.counted ?? true,
+      );
+
+      final int index = _grades.indexWhere(
+        (GradeEntry grade) => grade.id == next.id,
+      );
+      if (index >= 0) {
+        _grades[index] = next;
+      } else {
+        _grades.add(next);
+      }
+      appliedCount += 1;
+    }
+
+    _grades = _dedupeGrades(_grades)..sort(_compareGrades);
+    await _persistData();
+    _emitStatus(
+      '成绩导入完成：写入 $appliedCount 条，跳过 ${skippedMissingCourses.length} 条。',
+    );
+    return ExcelGradeImportResult(
+      appliedCount: appliedCount,
+      skippedMissingCourses: skippedMissingCourses,
+    );
   }
 
   Future<File> exportJson({bool includeSettings = true}) async {
@@ -383,7 +524,7 @@ class AppState extends ChangeNotifier {
         settings: exportSettings,
       ),
     );
-    _emitStatus('已导出当前学期 JSON: ${file.path}');
+    _emitStatus('已导出当前学期 JSON：${file.path}');
     return file;
   }
 
@@ -391,7 +532,7 @@ class AppState extends ChangeNotifier {
     final File file = await _importExportService.exportToCsv(
       ImportBundle(courses: courses, grades: grades),
     );
-    _emitStatus('已导出当前学期 CSV: ${file.path}');
+    _emitStatus('已导出当前学期 CSV：${file.path}');
     return file;
   }
 
@@ -406,7 +547,7 @@ class AppState extends ChangeNotifier {
       grades: _grades,
       settings: exportSettings,
     );
-    _emitStatus('已一键导出全部学期: ${file.path}');
+    _emitStatus('已导出全学期备份：${file.path}');
     return file;
   }
 
@@ -415,10 +556,13 @@ class AppState extends ChangeNotifier {
     required bool replaceExisting,
     bool applySettings = true,
   }) async {
-    final ImportBundle bundle = await _importExportService.importFromPath(path);
+    final ImportBundle bundle = await _importExportService.importFromPath(
+      path,
+      settings: _settings.copyWith(termStartMonday: currentTermStartMonday),
+    );
 
     if (bundle.allSemesters) {
-      throw Exception('该文件为“全部学期”备份，请使用“导入全部学期”功能。');
+      throw Exception('该文件是全学期备份，请使用“导入全部学期”。');
     }
 
     final List<Course> semCourses = bundle.courses
@@ -442,7 +586,7 @@ class AppState extends ChangeNotifier {
       await _persistSettings(syncWidget: true, syncNotifications: true);
     }
 
-    _emitStatus('导入完成：${applied.courses} 门课程，${applied.grades} 条成绩');
+    _emitStatus('导入完成：${applied.courses} 门课程，${applied.grades} 条成绩。');
     return applied;
   }
 
@@ -451,9 +595,12 @@ class AppState extends ChangeNotifier {
     required bool replaceExisting,
     bool applySettings = true,
   }) async {
-    final ImportBundle bundle = await _importExportService.importFromPath(path);
+    final ImportBundle bundle = await _importExportService.importFromPath(
+      path,
+      settings: _settings.copyWith(termStartMonday: currentTermStartMonday),
+    );
     if (!bundle.allSemesters) {
-      throw Exception('该文件不是“全部学期”备份文件。');
+      throw Exception('该文件不是全学期备份文件。');
     }
 
     final List<SemesterInfo> incomingSemesters = bundle.semesters;
@@ -489,7 +636,7 @@ class AppState extends ChangeNotifier {
     await _storageService.saveSettings(_settings);
     await _persistSemesterState();
 
-    _emitStatus('已导入全部学期数据');
+    _emitStatus('全学期数据导入完成。');
     return (
       courses: bundle.courses.length,
       grades: bundle.grades.length,
@@ -520,7 +667,7 @@ class AppState extends ChangeNotifier {
 
     final List<String> messages = <String>[
       ...result.messages,
-      '写入当前学期 ${applied.courses} 门课程，${applied.grades} 条成绩。',
+      '已写入当前学期：${applied.courses} 门课程，${applied.grades} 条成绩。',
     ];
 
     final AutoImportResult mergedResult = AutoImportResult(
@@ -538,33 +685,7 @@ class AppState extends ChangeNotifier {
   }) async {
     final AutoImportResult result = _teachingImportService
         .importFromExtractedPayload(payload);
-
-    final List<Course> semCourses = result.courses
-        .map((Course c) => c.copyWith(semesterId: _currentSemesterId))
-        .toList();
-    final List<GradeEntry> semGrades = result.grades
-        .map((GradeEntry g) => g.copyWith(semesterId: _currentSemesterId))
-        .toList();
-
-    final ({int courses, int grades}) applied = await _applyImportedData(
-      courses: semCourses,
-      grades: semGrades,
-      replaceExisting: replaceExisting,
-      semesterId: _currentSemesterId,
-    );
-
-    final List<String> messages = <String>[
-      ...result.messages,
-      '写入当前学期 ${applied.courses} 门课程，${applied.grades} 条成绩。',
-    ];
-
-    final AutoImportResult mergedResult = AutoImportResult(
-      courses: semCourses,
-      grades: semGrades,
-      messages: messages,
-    );
-    _emitStatus(messages.join(' '));
-    return mergedResult;
+    return _applyAutoImportResult(result, replaceExisting: replaceExisting);
   }
 
   Future<AutoImportResult> importFromTimetableHtmlSnapshot({
@@ -573,30 +694,57 @@ class AppState extends ChangeNotifier {
   }) async {
     final AutoImportResult result = _teachingImportService
         .importFromTimetableHtmlSnapshot(html);
+    return _applyAutoImportResult(result, replaceExisting: replaceExisting);
+  }
 
-    final List<Course> semCourses = result.courses
-        .map((Course c) => c.copyWith(semesterId: _currentSemesterId))
-        .toList();
+  Future<AutoImportResult> importFromJwxtCapture({
+    required Map<String, dynamic> payload,
+    required bool replaceExisting,
+  }) async {
+    final String html = (payload['pageHtml'] as String? ?? '').trim();
+    final AutoImportResult htmlResult = html.isEmpty
+        ? const AutoImportResult(
+            courses: <Course>[],
+            grades: <GradeEntry>[],
+            messages: <String>[],
+          )
+        : _teachingImportService.importFromTimetableHtmlSnapshot(html);
+    final AutoImportResult payloadResult = _teachingImportService
+        .importFromExtractedPayload(payload);
 
-    final ({int courses, int grades}) applied = await _applyImportedData(
-      courses: semCourses,
-      grades: const <GradeEntry>[],
-      replaceExisting: replaceExisting,
-      semesterId: _currentSemesterId,
+    final AutoImportResult mergedSource = _mergeAutoImportResults(
+      <AutoImportResult>[htmlResult, payloadResult],
     );
+    final int onlineCount = mergedSource.courses
+        .where((Course course) => course.isOnline)
+        .length;
+    final int scheduledCount = mergedSource.courses.length - onlineCount;
+    final List<String> sourceMessages = _uniqueMessages(<String>[
+      ...htmlResult.messages,
+      ...payloadResult.messages,
+    ]);
 
     final List<String> messages = <String>[
-      ...result.messages,
-      '写入当前学期 ${applied.courses} 门课程。',
+      if (html.isNotEmpty &&
+          htmlResult.courses.isNotEmpty &&
+          payloadResult.courses.isNotEmpty)
+        '已合并页面源码与页面数据，避免遗漏网课和特殊课程。',
+      if (mergedSource.courses.isNotEmpty)
+        '识别到 ${mergedSource.courses.length} 门课程，其中排课 $scheduledCount 门、网课 $onlineCount 门。',
+      if (mergedSource.grades.isNotEmpty)
+        '识别到 ${mergedSource.grades.length} 条成绩。',
+      if (mergedSource.courses.isEmpty && mergedSource.grades.isEmpty)
+        ...sourceMessages,
     ];
 
-    final AutoImportResult mergedResult = AutoImportResult(
-      courses: semCourses,
-      grades: const <GradeEntry>[],
-      messages: messages,
+    return _applyAutoImportResult(
+      AutoImportResult(
+        courses: mergedSource.courses,
+        grades: mergedSource.grades,
+        messages: messages,
+      ),
+      replaceExisting: replaceExisting,
     );
-    _emitStatus(messages.join(' '));
-    return mergedResult;
   }
 
   Future<void> setThemeMode(ThemeModeSetting value) async {
@@ -614,7 +762,7 @@ class AppState extends ChangeNotifier {
     }
     _settings = _settings.copyWith(reminderMinutesBefore: normalized);
     await _persistSettings(syncWidget: false, syncNotifications: true);
-    _emitStatus('提醒已更新：提前 $normalized 分钟');
+    _emitStatus('上课提醒已更新：提前 $normalized 分钟。');
   }
 
   Future<void> setTermStartMonday(DateTime date) async {
@@ -627,7 +775,7 @@ class AppState extends ChangeNotifier {
       name: currentSemester.name,
       termStartMonday: monday,
     );
-    _emitStatus('学期起始周已更新');
+    _emitStatus('学期首周已更新。');
   }
 
   Future<void> setDailyScheduleConfig({
@@ -660,6 +808,11 @@ class AppState extends ChangeNotifier {
       periodDurationMinutes: duration,
       maxPeriodsPerDay: maxPeriods,
     );
+    final List<String> ends = buildPeriodEndTimes(
+      periodStartTimes: starts,
+      periodDurationMinutes: duration,
+      dayEndTime: normalizedEnd,
+    );
 
     _settings = _settings.copyWith(
       dayStartTime: normalizedStart,
@@ -667,9 +820,10 @@ class AppState extends ChangeNotifier {
       periodDurationMinutes: duration,
       maxPeriodsPerDay: maxPeriods,
       periodStartTimes: starts,
+      periodEndTimes: ends,
     );
     await _persistSettings(syncWidget: false, syncNotifications: true);
-    _emitStatus('作息参数已更新');
+    _emitStatus('作息设置已更新。');
   }
 
   Future<void> setMaxPeriodsPerDay(int maxPeriodsPerDay) async {
@@ -681,29 +835,42 @@ class AppState extends ChangeNotifier {
       source: _settings.periodStartTimes,
       maxPeriods: maxPeriods,
     );
+    final List<String> ends = _normalizePeriodEnds(
+      source: _settings.periodEndTimes,
+      starts: starts,
+      maxPeriods: maxPeriods,
+    );
     _settings = _settings.copyWith(
       maxPeriodsPerDay: maxPeriods,
       periodStartTimes: starts,
+      periodEndTimes: ends,
     );
     await _persistSettings(syncWidget: false, syncNotifications: true);
-    _emitStatus('每天最大节次已更新');
+    _emitStatus('每日最大节次已更新。');
   }
 
   Future<void> setSchedulePeriods({
     required int maxPeriodsPerDay,
     required List<String> periodStartTimes,
+    required List<String> periodEndTimes,
   }) async {
     final int maxPeriods = maxPeriodsPerDay.clamp(1, 24);
     final List<String> starts = _normalizePeriodStarts(
       source: periodStartTimes,
       maxPeriods: maxPeriods,
     );
+    final List<String> ends = _normalizePeriodEnds(
+      source: periodEndTimes,
+      starts: starts,
+      maxPeriods: maxPeriods,
+    );
     _settings = _settings.copyWith(
       maxPeriodsPerDay: maxPeriods,
       periodStartTimes: starts,
+      periodEndTimes: ends,
     );
     await _persistSettings(syncWidget: false, syncNotifications: true);
-    _emitStatus('课程节次与时间已更新');
+    _emitStatus('节次时间已更新。');
   }
 
   Future<void> setFrostedCard(bool enabled) async {
@@ -720,7 +887,7 @@ class AppState extends ChangeNotifier {
     }
     _settings = _settings.copyWith(showWeekSummaryInWidget: enabled);
     await _persistSettings(syncWidget: true, syncNotifications: false);
-    _emitStatus('组件显示设置已更新');
+    _emitStatus('组件显示设置已更新。');
   }
 
   Future<void> setWindowsDesktopPinned(bool enabled) async {
@@ -732,27 +899,43 @@ class AppState extends ChangeNotifier {
       final bool actual = await _windowsDesktopService.getMiniWindowMode();
       effective = actual;
       if (!applied && actual != enabled) {
-        _emitStatus('小窗模式切换失败');
+        _emitStatus('Windows 小窗模式切换失败。');
         return;
       }
     }
 
     _settings = _settings.copyWith(windowsDesktopPinned: effective);
+    if (_settings.windowsAutoStart) {
+      final bool applied = await _windowsDesktopService.setAutoStart(
+        true,
+        startMiniMode: effective,
+      );
+      if (applied) {
+        _settings = _settings.copyWith(windowsAutoStartMiniMode: effective);
+      }
+    }
     await _storageService.saveSettings(_settings);
     notifyListeners();
-    _emitStatus(effective ? '小窗模式已开启' : '小窗模式已关闭');
+    _emitStatus(effective ? 'Windows 小窗模式已启用。' : 'Windows 小窗模式已关闭。');
   }
 
   Future<void> setWindowsAutoStart(bool enabled) async {
-    final bool applied = await _windowsDesktopService.setAutoStart(enabled);
+    final bool startMiniMode = enabled ? _windowsMiniMode : false;
+    final bool applied = await _windowsDesktopService.setAutoStart(
+      enabled,
+      startMiniMode: startMiniMode,
+    );
     if (Platform.isWindows && !applied) {
-      _emitStatus('开机自启动设置失败');
+      _emitStatus('开机自启动设置更新失败。');
       return;
     }
-    _settings = _settings.copyWith(windowsAutoStart: enabled);
+    _settings = _settings.copyWith(
+      windowsAutoStart: enabled,
+      windowsAutoStartMiniMode: enabled ? startMiniMode : false,
+    );
     await _storageService.saveSettings(_settings);
     notifyListeners();
-    _emitStatus(enabled ? '开机自启动已开启' : '开机自启动已关闭');
+    _emitStatus(enabled ? '开机自启动已启用。' : '开机自启动已关闭。');
   }
 
   Future<void> startWindowsMiniDrag() async {
@@ -780,20 +963,27 @@ class AppState extends ChangeNotifier {
       if (!applied && !actual) {
         _windowsMiniMode = false;
         notifyListeners();
-        _emitStatus('Windows mini mode switch failed');
+        _emitStatus('Windows 小窗模式切换失败。');
         return;
       }
       _windowsMiniMode = actual;
     }
 
     _settings = _settings.copyWith(windowsDesktopPinned: _windowsMiniMode);
+    if (_settings.windowsAutoStart) {
+      final bool applied = await _windowsDesktopService.setAutoStart(
+        true,
+        startMiniMode: _windowsMiniMode,
+      );
+      if (applied) {
+        _settings = _settings.copyWith(
+          windowsAutoStartMiniMode: _windowsMiniMode,
+        );
+      }
+    }
     await _storageService.saveSettings(_settings);
     notifyListeners();
-    _emitStatus(
-      _windowsMiniMode
-          ? 'Windows mini mode enabled'
-          : 'Windows mini mode disabled',
-    );
+    _emitStatus(_windowsMiniMode ? 'Windows 小窗模式已启用。' : 'Windows 小窗模式已关闭。');
   }
 
   Future<void> exitWindowsMiniMode() async {
@@ -804,7 +994,7 @@ class AppState extends ChangeNotifier {
       );
       final bool actual = await _windowsDesktopService.getMiniWindowMode();
       if (!applied && actual) {
-        _emitStatus('Windows mini mode switch failed');
+        _emitStatus('Windows 小窗模式切换失败。');
         return;
       }
       effective = actual;
@@ -812,9 +1002,18 @@ class AppState extends ChangeNotifier {
 
     _windowsMiniMode = effective;
     _settings = _settings.copyWith(windowsDesktopPinned: effective);
+    if (_settings.windowsAutoStart) {
+      final bool applied = await _windowsDesktopService.setAutoStart(
+        true,
+        startMiniMode: effective,
+      );
+      if (applied) {
+        _settings = _settings.copyWith(windowsAutoStartMiniMode: effective);
+      }
+    }
     await _storageService.saveSettings(_settings);
     notifyListeners();
-    _emitStatus('Windows mini mode disabled');
+    _emitStatus('Windows 小窗模式已关闭。');
   }
 
   Future<void> launchWindowsMiniWindow() async {
@@ -825,7 +1024,7 @@ class AppState extends ChangeNotifier {
     final bool launched = await _windowsDesktopService
         .launchMiniWindowProcess();
     if (!launched) {
-      _emitStatus('Windows mini mode switch failed');
+      _emitStatus('Windows 小窗模式切换失败。');
     }
   }
 
@@ -837,18 +1036,18 @@ class AppState extends ChangeNotifier {
     final bool launched = await _windowsDesktopService
         .launchMainWindowProcess();
     if (!launched) {
-      _emitStatus('Windows mini mode switch failed');
+      _emitStatus('Windows 小窗模式切换失败。');
     }
   }
 
   Future<void> syncWidgetNow() async {
     await _syncWidget(ignoreErrors: false);
-    _emitStatus('组件已同步');
+    _emitStatus('小组件同步完成。');
   }
 
   Future<void> regenerateNotifications() async {
     await _syncNotifications(ignoreErrors: false);
-    _emitStatus('提醒已重建');
+    _emitStatus('提醒已重建。');
   }
 
   Future<({int courses, int grades})> _applyImportedData({
@@ -913,6 +1112,68 @@ class AppState extends ChangeNotifier {
     return (courses: appliedCourseCount, grades: appliedGradeCount);
   }
 
+  Future<AutoImportResult> _applyAutoImportResult(
+    AutoImportResult result, {
+    required bool replaceExisting,
+  }) async {
+    final List<Course> semCourses = result.courses
+        .map((Course c) => c.copyWith(semesterId: _currentSemesterId))
+        .toList();
+    final List<GradeEntry> semGrades = result.grades
+        .map((GradeEntry g) => g.copyWith(semesterId: _currentSemesterId))
+        .toList();
+
+    final ({int courses, int grades}) applied = await _applyImportedData(
+      courses: semCourses,
+      grades: semGrades,
+      replaceExisting: replaceExisting,
+      semesterId: _currentSemesterId,
+    );
+
+    final List<String> messages = <String>[
+      ...result.messages,
+      '已写入当前学期：${applied.courses} 门课程，${applied.grades} 条成绩。',
+    ];
+
+    final AutoImportResult mergedResult = AutoImportResult(
+      courses: semCourses,
+      grades: semGrades,
+      messages: _uniqueMessages(messages),
+    );
+    _emitStatus(mergedResult.messages.join(' '));
+    return mergedResult;
+  }
+
+  AutoImportResult _mergeAutoImportResults(List<AutoImportResult> results) {
+    final List<Course> courses = _dedupeCourses(
+      results.expand((AutoImportResult result) => result.courses).toList(),
+    );
+    final List<GradeEntry> grades = _dedupeGrades(
+      results.expand((AutoImportResult result) => result.grades).toList(),
+    );
+    final List<String> messages = _uniqueMessages(
+      results.expand((AutoImportResult result) => result.messages).toList(),
+    );
+    return AutoImportResult(
+      courses: courses,
+      grades: grades,
+      messages: messages,
+    );
+  }
+
+  List<String> _uniqueMessages(List<String> messages) {
+    final Set<String> seen = <String>{};
+    final List<String> unique = <String>[];
+    for (final String message in messages) {
+      final String trimmed = message.trim();
+      if (trimmed.isEmpty || !seen.add(trimmed)) {
+        continue;
+      }
+      unique.add(trimmed);
+    }
+    return unique;
+  }
+
   ({List<Course> merged, int added}) _mergeCourses(
     List<Course> base,
     List<Course> incoming,
@@ -946,9 +1207,6 @@ class AppState extends ChangeNotifier {
   List<Course> _dedupeCourses(List<Course> courses) {
     final Map<String, Course> map = <String, Course>{};
     for (final Course course in courses) {
-      if (course.sessions.isEmpty) {
-        continue;
-      }
       map[_courseKey(course)] = course;
     }
     return map.values.toList();
@@ -978,6 +1236,7 @@ class AppState extends ChangeNotifier {
         '${course.code.trim().toLowerCase()}|'
         '${course.teacher.trim().toLowerCase()}|'
         '${course.location.trim().toLowerCase()}|'
+        '${course.courseType.jsonValue}|'
         '${course.credit.toStringAsFixed(2)}|'
         '${sessionKeys.join(';')}';
   }
@@ -995,12 +1254,19 @@ class AppState extends ChangeNotifier {
         '${grade.credit.toStringAsFixed(2)}|'
         '$score|'
         '$gpa|'
+        '${grade.resultType.jsonValue}|'
         '${grade.counted}';
   }
 
   int _compareCourses(Course a, Course b) {
     if (a.semesterId != b.semesterId) {
       return a.semesterId.compareTo(b.semesterId);
+    }
+    if (a.isOnline != b.isOnline) {
+      return a.isOnline ? 1 : -1;
+    }
+    if (!a.hasSchedule && !b.hasSchedule) {
+      return a.name.compareTo(b.name);
     }
 
     final CourseSession aSession = _firstSession(a);
@@ -1030,6 +1296,15 @@ class AppState extends ChangeNotifier {
   }
 
   CourseSession _firstSession(Course course) {
+    if (course.sessions.isEmpty) {
+      return const CourseSession(
+        weekday: DateTime.monday,
+        startPeriod: 99,
+        endPeriod: 99,
+        startWeek: 1,
+        endWeek: 1,
+      );
+    }
     final List<CourseSession> sessions =
         List<CourseSession>.from(course.sessions)
           ..sort((CourseSession a, CourseSession b) {
@@ -1057,6 +1332,49 @@ class AppState extends ChangeNotifier {
       return 999;
     }
     return starts.reduce(math.min);
+  }
+
+  Course? _matchCourseForExcelRow({
+    required ExcelGradeRow row,
+    required String semesterId,
+  }) {
+    final Iterable<Course> semesterCourses = _courses.where(
+      (Course course) => course.semesterId == semesterId,
+    );
+    final String normalizedCode = row.courseCode.trim().toLowerCase();
+    if (normalizedCode.isNotEmpty) {
+      for (final Course course in semesterCourses) {
+        if (course.code.trim().toLowerCase() == normalizedCode) {
+          return course;
+        }
+      }
+    }
+
+    final String normalizedName = row.courseName.trim().toLowerCase();
+    for (final Course course in semesterCourses) {
+      if (course.name.trim().toLowerCase() == normalizedName) {
+        return course;
+      }
+    }
+    return null;
+  }
+
+  GradeEntry? _gradeForCourseInSemester(
+    Course course, {
+    required String semesterId,
+  }) {
+    for (final GradeEntry grade in _grades) {
+      if (grade.semesterId == semesterId && grade.courseId == course.id) {
+        return grade;
+      }
+    }
+    for (final GradeEntry grade in _grades) {
+      if (grade.semesterId == semesterId &&
+          grade.courseName.trim() == course.name.trim()) {
+        return grade;
+      }
+    }
+    return null;
   }
 
   Course _normalizeCourseSemester(Course course) {
@@ -1174,16 +1492,25 @@ class AppState extends ChangeNotifier {
     }
 
     _windowsMiniMode = await _windowsDesktopService.getMiniWindowMode();
-    await _windowsDesktopService.setAutoStart(_settings.windowsAutoStart);
+    final bool desiredAutoStartMini = _settings.windowsAutoStart
+        ? _windowsMiniMode
+        : false;
+    await _windowsDesktopService.setAutoStart(
+      _settings.windowsAutoStart,
+      startMiniMode: desiredAutoStartMini,
+    );
     final bool autoStart = await _windowsDesktopService.getAutoStart();
 
     final bool settingsChanged =
         _settings.windowsDesktopPinned ||
-        autoStart != _settings.windowsAutoStart;
+        autoStart != _settings.windowsAutoStart ||
+        _settings.windowsAutoStartMiniMode !=
+            (autoStart ? desiredAutoStartMini : false);
     if (settingsChanged) {
       _settings = _settings.copyWith(
         windowsDesktopPinned: false,
         windowsAutoStart: autoStart,
+        windowsAutoStartMiniMode: autoStart ? desiredAutoStartMini : false,
       );
       await _storageService.saveSettings(_settings);
       notifyListeners();
@@ -1223,6 +1550,65 @@ class AppState extends ChangeNotifier {
       normalized.add(
         '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}',
       );
+    }
+
+    return normalized.take(maxPeriods).toList();
+  }
+
+  List<String> _normalizePeriodEnds({
+    required List<String> source,
+    required List<String> starts,
+    required int maxPeriods,
+  }) {
+    final List<String> normalized = source
+        .map((String item) => normalizeTimeText(item, fallback: ''))
+        .where((String item) => item.isNotEmpty)
+        .toList();
+
+    final List<String> fallback = _settings.periodEndTimes.isNotEmpty
+        ? _settings.periodEndTimes
+        : buildPeriodEndTimes(
+            periodStartTimes: starts,
+            periodDurationMinutes: _settings.periodDurationMinutes,
+            dayEndTime: _settings.dayEndTime,
+          );
+
+    for (final String item in fallback) {
+      if (normalized.length >= maxPeriods) {
+        break;
+      }
+      normalized.add(normalizeTimeText(item, fallback: '08:50'));
+    }
+
+    while (normalized.length < maxPeriods) {
+      final String base = starts.length > normalized.length
+          ? starts[normalized.length]
+          : (starts.isEmpty ? '08:00' : starts.last);
+      final int? minutes = timeTextToMinutes(base);
+      final int next = (minutes ?? (8 * 60)) + _settings.periodDurationMinutes;
+      final int safe = next.clamp(0, 24 * 60 - 1);
+      final int hour = safe ~/ 60;
+      final int minute = safe % 60;
+      normalized.add(
+        '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}',
+      );
+    }
+
+    for (int i = 0; i < maxPeriods; i++) {
+      final int? start = i < starts.length
+          ? timeTextToMinutes(starts[i])
+          : null;
+      final int? end = timeTextToMinutes(normalized[i]);
+      if (start != null && end != null && end <= start) {
+        final int fixed = (start + _settings.periodDurationMinutes).clamp(
+          0,
+          24 * 60 - 1,
+        );
+        final int hour = fixed ~/ 60;
+        final int minute = fixed % 60;
+        normalized[i] =
+            '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+      }
     }
 
     return normalized.take(maxPeriods).toList();

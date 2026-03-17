@@ -253,12 +253,10 @@ const String _extractDataScript = r'''
       dataSemester: dataSemester
     };
 
-    if (!course.scheduleText) {
+    if (!course.scheduleText && !isOnlineCourse(course.name, course.teacher, rowText)) {
       return null;
     }
-    if (isOnlineCourse(course.name, course.teacher, course.scheduleText)) {
-      return null;
-    }
+    course.isOnline = isOnlineCourse(course.name, course.teacher, course.scheduleText || rowText);
     return course;
   }
 
@@ -297,7 +295,9 @@ const String _extractDataScript = r'''
 
         var rows = doc.querySelectorAll('tr');
         var lessonRows = doc.querySelectorAll('tr.lessonInfo');
-        var score = lessonRows.length * 1000 + rows.length;
+        var gradeTables = doc.querySelectorAll('table.student-grade-table').length;
+        var semesterTitles = doc.querySelectorAll('.semesterName').length;
+        var score = lessonRows.length * 1000 + gradeTables * 1500 + semesterTitles * 120 + rows.length;
         if (score > bestDocScore) {
           bestDocScore = score;
           pageHtml = doc.documentElement ? String(doc.documentElement.outerHTML || '') : '';
@@ -345,8 +345,15 @@ const String _extractDataScript = r'''
 })();
 ''';
 
+enum JwxtImportMode { timetable, grade }
+
 class JwxtImportWebViewPage extends StatefulWidget {
-  const JwxtImportWebViewPage({super.key});
+  const JwxtImportWebViewPage({
+    super.key,
+    this.mode = JwxtImportMode.timetable,
+  });
+
+  final JwxtImportMode mode;
 
   @override
   State<JwxtImportWebViewPage> createState() => _JwxtImportWebViewPageState();
@@ -507,12 +514,21 @@ class _JwxtImportWebViewPageState extends State<JwxtImportWebViewPage> {
         throw const FormatException('提取结果格式错误');
       }
 
-      final List<dynamic> courses =
-          (decoded['courses'] as List<dynamic>?) ?? <dynamic>[];
-      if (courses.isEmpty) {
-        setState(() => _extracting = false);
-        _showMessage('未识别到课程，请先打开“我的课表/全部课程”页面再提取。');
-        return;
+      if (widget.mode == JwxtImportMode.timetable) {
+        final List<dynamic> courses =
+            (decoded['courses'] as List<dynamic>?) ?? <dynamic>[];
+        if (courses.isEmpty) {
+          setState(() => _extracting = false);
+          _showMessage('未识别到课程，请先打开“我的课表/全部课程”页面再提取。');
+          return;
+        }
+      } else {
+        final String pageHtml = (decoded['pageHtml'] as String? ?? '').trim();
+        if (pageHtml.isEmpty || !pageHtml.contains('student-grade-table')) {
+          setState(() => _extracting = false);
+          _showMessage('未识别到成绩表，请先打开“成绩信息/学生成绩单”页面再提取。');
+          return;
+        }
       }
 
       Navigator.of(context).pop<Map<String, dynamic>>(decoded);
@@ -533,7 +549,7 @@ class _JwxtImportWebViewPageState extends State<JwxtImportWebViewPage> {
   Widget build(BuildContext context) {
     if (!_supported) {
       return Scaffold(
-        appBar: AppBar(title: const Text('教务系统导入')),
+        appBar: AppBar(title: Text(_pageTitle)),
         body: const Center(
           child: Padding(
             padding: EdgeInsets.all(20),
@@ -545,7 +561,7 @@ class _JwxtImportWebViewPageState extends State<JwxtImportWebViewPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('教务系统导入'),
+        title: Text(_pageTitle),
         actions: <Widget>[
           TextButton.icon(
             onPressed: (_canExtract && !_extracting) ? _extract : null,
@@ -556,7 +572,7 @@ class _JwxtImportWebViewPageState extends State<JwxtImportWebViewPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.download_for_offline_outlined),
-            label: const Text('提取课程'),
+            label: Text(_actionLabel),
           ),
           const SizedBox(width: 8),
         ],
@@ -572,12 +588,27 @@ class _JwxtImportWebViewPageState extends State<JwxtImportWebViewPage> {
             width: double.infinity,
             color: Theme.of(context).colorScheme.surfaceContainerHighest,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: const Text(
-              '操作：登录门户 -> 进入教务系统 -> 打开“我的课表/全部课程” -> 点击右上角“提取课程”。',
-            ),
+            child: Text(_instructionText),
           ),
         ],
       ),
     );
   }
+
+  String get _pageTitle => switch (widget.mode) {
+    JwxtImportMode.timetable => '教务课表导入',
+    JwxtImportMode.grade => '教务成绩导入',
+  };
+
+  String get _actionLabel => switch (widget.mode) {
+    JwxtImportMode.timetable => '提取课程',
+    JwxtImportMode.grade => '提取成绩',
+  };
+
+  String get _instructionText => switch (widget.mode) {
+    JwxtImportMode.timetable =>
+      '操作：登录门户 -> 进入教务系统 -> 打开“我的课表/全部课程” -> 点击右上角“提取课程”。',
+    JwxtImportMode.grade =>
+      '操作：登录门户 -> 进入教务系统 -> 打开“成绩信息/学生成绩单” -> 等待成绩表加载完成 -> 点击右上角“提取成绩”。',
+  };
 }

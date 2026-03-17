@@ -10,6 +10,8 @@ import '../widgets/frosted_panel.dart';
 
 enum _ScheduleMode { dayList, weekList, weekGrid }
 
+enum _CourseGradeMode { pending, gpa, pass, noPass }
+
 class SchedulePage extends StatefulWidget {
   const SchedulePage({super.key, required this.appState});
 
@@ -50,6 +52,10 @@ class _SchedulePageState extends State<SchedulePage> {
           _modeBar(state.settings.frostedCards),
           const SizedBox(height: 8),
           _weekNavigator(state.settings.frostedCards, weekStart),
+          if (state.onlineCourses.isNotEmpty) ...<Widget>[
+            const SizedBox(height: 8),
+            _OnlineCoursePanel(appState: state, courses: state.onlineCourses),
+          ],
           if (_mode == _ScheduleMode.dayList) ...<Widget>[
             const SizedBox(height: 8),
             _weekdaySelector(state.settings.frostedCards, weekStart),
@@ -98,7 +104,10 @@ class _SchedulePageState extends State<SchedulePage> {
     final DateTime titleDate = _mode == _ScheduleMode.dayList
         ? selectedDate
         : weekStart;
+    final bool compact = MediaQuery.sizeOf(context).width < 430;
+
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
         Expanded(
           child: Column(
@@ -109,30 +118,54 @@ class _SchedulePageState extends State<SchedulePage> {
                   Text(
                     '课程总览',
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontSize: compact ? 24 : null,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  SizedBox(width: compact ? 8 : 10),
                   Expanded(
                     child: Text(
                       state.currentSemester.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleMedium,
+                      style: compact
+                          ? Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            )
+                          : Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 4),
-              Text(DateFormat('yyyy年M月d日 EEEE', 'zh_CN').format(titleDate)),
+              Wrap(
+                spacing: 8,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: <Widget>[
+                  Text(DateFormat('yyyy年M月d日 EEEE', 'zh_CN').format(titleDate)),
+                  if (state.onlineCourses.isNotEmpty)
+                    _OnlineCourseBadge(count: state.onlineCourses.length),
+                ],
+              ),
             ],
           ),
         ),
-        FilledButton.icon(
-          onPressed: () => _createOrEditCourse(context, state),
-          icon: const Icon(Icons.add),
-          label: const Text('新增课程'),
-        ),
+        const SizedBox(width: 12),
+        compact
+            ? FilledButton(
+                onPressed: () => _createOrEditCourse(context, state),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(46, 46),
+                  padding: EdgeInsets.zero,
+                ),
+                child: const Icon(Icons.add),
+              )
+            : FilledButton.icon(
+                onPressed: () => _createOrEditCourse(context, state),
+                icon: const Icon(Icons.add),
+                label: const Text('新增课程'),
+              ),
       ],
     );
   }
@@ -361,6 +394,7 @@ class _DayListBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
+      padding: EdgeInsets.only(bottom: _mobileDockClearance(context)),
       children: <Widget>[
         _CourseSectionCard(
           appState: appState,
@@ -389,6 +423,7 @@ class _WeekListBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
+      padding: EdgeInsets.only(bottom: _mobileDockClearance(context)),
       children: <Widget>[
         for (int day = DateTime.monday; day <= DateTime.sunday; day++)
           _CourseSectionCard(
@@ -456,6 +491,254 @@ class _CourseSectionCard extends StatelessWidget {
   }
 }
 
+class _OnlineCoursePanel extends StatelessWidget {
+  const _OnlineCoursePanel({required this.appState, required this.courses});
+
+  final AppState appState;
+  final List<Course> courses;
+
+  @override
+  Widget build(BuildContext context) {
+    return FrostedPanel(
+      enabled: appState.settings.frostedCards,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.cast_for_education_rounded,
+                  size: 20,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '独立网课',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '共 ${courses.length} 门',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '网课不会进入日列表、周列表和周视图，统一在这里查看。',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 10),
+            ...courses.map(
+              (Course course) =>
+                  _OnlineCourseCard(appState: appState, course: course),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnlineCourseBadge extends StatelessWidget {
+  const _OnlineCourseBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: theme.colorScheme.primary.withValues(alpha: 0.24),
+        ),
+      ),
+      child: Text(
+        '网课 $count 门',
+        style: theme.textTheme.bodySmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: theme.colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
+class _OnlineCourseCard extends StatefulWidget {
+  const _OnlineCourseCard({required this.appState, required this.course});
+
+  final AppState appState;
+  final Course course;
+
+  @override
+  State<_OnlineCourseCard> createState() => _OnlineCourseCardState();
+}
+
+class _OnlineCourseCardState extends State<_OnlineCourseCard> {
+  late final TextEditingController _gpaController;
+  _CourseGradeMode _gradeMode = _CourseGradeMode.pending;
+
+  @override
+  void initState() {
+    super.initState();
+    _gpaController = TextEditingController();
+    _refreshGradeText();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OnlineCourseCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _refreshGradeText();
+  }
+
+  void _refreshGradeText() {
+    final GradeEntry? grade = widget.appState.gradeForCourse(widget.course);
+    _gradeMode = switch (grade?.resultType) {
+      GradeResultType.gpa => _CourseGradeMode.gpa,
+      GradeResultType.pass => _CourseGradeMode.pass,
+      GradeResultType.noPass => _CourseGradeMode.noPass,
+      null => _CourseGradeMode.pending,
+    };
+    _gpaController.text =
+        grade?.resultType == GradeResultType.gpa &&
+            grade?.finalGradePoint != null
+        ? grade!.finalGradePoint!.toStringAsFixed(2)
+        : '';
+  }
+
+  @override
+  void dispose() {
+    _gpaController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final String teacher = firstTeacher(widget.course.teacher);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: widget.course.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: widget.course.color.withValues(alpha: 0.32)),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        title: Text(
+          widget.course.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            const Text('在线课程 · 不排课'),
+            Text(
+              teacher.isEmpty ? '教师待补充' : teacher,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+        children: <Widget>[
+          _DetailLine(label: '课程类型', value: '网课 / 不排课'),
+          _DetailLine(
+            label: '任课教师',
+            value: widget.course.teacher.isEmpty ? '-' : widget.course.teacher,
+          ),
+          _DetailLine(
+            label: '课程代码',
+            value: widget.course.code.isEmpty ? '-' : widget.course.code,
+          ),
+          _DetailLine(
+            label: '学分',
+            value: widget.course.credit.toStringAsFixed(1),
+          ),
+          const SizedBox(height: 8),
+          Text('成绩录入', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _CourseGradeModeSelector(
+            mode: _gradeMode,
+            onChanged: (_CourseGradeMode value) {
+              setState(() {
+                _gradeMode = value;
+                if (value != _CourseGradeMode.gpa) {
+                  _gpaController.clear();
+                }
+              });
+            },
+          ),
+          if (_gradeMode == _CourseGradeMode.gpa) ...<Widget>[
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _gpaController,
+                    decoration: const InputDecoration(
+                      labelText: '绩点',
+                      hintText: '留空表示删除成绩',
+                      isDense: true,
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  onPressed: _saveGrade,
+                  child: const Text('保存'),
+                ),
+              ],
+            ),
+          ] else ...<Widget>[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonal(
+                onPressed: _saveGrade,
+                child: const Text('保存'),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveGrade() async {
+    final String text = _gpaController.text.trim();
+    double? gpa;
+    if (_gradeMode == _CourseGradeMode.gpa) {
+      gpa = text.isEmpty ? null : double.tryParse(text);
+      if (text.isNotEmpty && gpa == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('绩点格式错误')));
+        return;
+      }
+    }
+
+    await widget.appState.runWithBusy(() {
+      return widget.appState.setCourseGradeResult(
+        course: widget.course,
+        resultType: _gradeMode.toGradeResultType(),
+        gradePoint: gpa,
+      );
+    });
+  }
+}
+
 class _CourseExpansionCard extends StatefulWidget {
   const _CourseExpansionCard({
     required this.appState,
@@ -476,6 +759,7 @@ class _CourseExpansionCard extends StatefulWidget {
 class _CourseExpansionCardState extends State<_CourseExpansionCard> {
   bool _expanded = false;
   late final TextEditingController _gpaController;
+  _CourseGradeMode _gradeMode = _CourseGradeMode.pending;
 
   @override
   void initState() {
@@ -492,7 +776,17 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
 
   void _refreshGradeText() {
     final GradeEntry? grade = widget.appState.gradeForCourse(widget.course);
-    _gpaController.text = grade?.finalGradePoint?.toStringAsFixed(2) ?? '';
+    _gradeMode = switch (grade?.resultType) {
+      GradeResultType.gpa => _CourseGradeMode.gpa,
+      GradeResultType.pass => _CourseGradeMode.pass,
+      GradeResultType.noPass => _CourseGradeMode.noPass,
+      null => _CourseGradeMode.pending,
+    };
+    _gpaController.text =
+        grade?.resultType == GradeResultType.gpa &&
+            grade?.finalGradePoint != null
+        ? grade!.finalGradePoint!.toStringAsFixed(2)
+        : '';
   }
 
   @override
@@ -564,24 +858,53 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
             value: widget.course.credit.toStringAsFixed(1),
           ),
           const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _gpaController,
-                  decoration: const InputDecoration(
-                    labelText: '绩点（留空表示未出分）',
-                    isDense: true,
-                  ),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+          Text('成绩录入', style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 8),
+          _CourseGradeModeSelector(
+            mode: _gradeMode,
+            onChanged: (_CourseGradeMode value) {
+              setState(() {
+                _gradeMode = value;
+                if (value != _CourseGradeMode.gpa) {
+                  _gpaController.clear();
+                }
+              });
+            },
+          ),
+          if (_gradeMode == _CourseGradeMode.gpa) ...<Widget>[
+            const SizedBox(height: 8),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: TextField(
+                    controller: _gpaController,
+                    decoration: const InputDecoration(
+                      labelText: '绩点',
+                      hintText: '留空表示删除成绩',
+                      isDense: true,
+                    ),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
+                FilledButton.tonal(
+                  onPressed: _saveGrade,
+                  child: const Text('保存'),
+                ),
+              ],
+            ),
+          ] else ...<Widget>[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.tonal(
+                onPressed: _saveGrade,
+                child: const Text('保存'),
               ),
-              const SizedBox(width: 8),
-              FilledButton.tonal(onPressed: _saveGpa, child: const Text('保存')),
-            ],
-          ),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             children: <Widget>[
@@ -624,18 +947,23 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
     return course.sessions.first;
   }
 
-  Future<void> _saveGpa() async {
+  Future<void> _saveGrade() async {
     final String text = _gpaController.text.trim();
-    final double? gpa = text.isEmpty ? null : double.tryParse(text);
-    if (text.isNotEmpty && gpa == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('绩点格式错误')));
-      return;
+    double? gpa;
+    if (_gradeMode == _CourseGradeMode.gpa) {
+      gpa = text.isEmpty ? null : double.tryParse(text);
+      if (text.isNotEmpty && gpa == null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('绩点格式错误')));
+        return;
+      }
     }
+
     await widget.appState.runWithBusy(() {
-      return widget.appState.setCourseGradePoint(
+      return widget.appState.setCourseGradeResult(
         course: widget.course,
+        resultType: _gradeMode.toGradeResultType(),
         gradePoint: gpa,
       );
     });
@@ -644,6 +972,97 @@ class _CourseExpansionCardState extends State<_CourseExpansionCard> {
   Future<void> _delete() async {
     await widget.appState.runWithBusy(
       () => widget.appState.deleteCourse(widget.course.id),
+    );
+  }
+}
+
+extension on _CourseGradeMode {
+  GradeResultType? toGradeResultType() => switch (this) {
+    _CourseGradeMode.pending => null,
+    _CourseGradeMode.gpa => GradeResultType.gpa,
+    _CourseGradeMode.pass => GradeResultType.pass,
+    _CourseGradeMode.noPass => GradeResultType.noPass,
+  };
+}
+
+class _CourseGradeModeSelector extends StatelessWidget {
+  const _CourseGradeModeSelector({required this.mode, required this.onChanged});
+
+  final _CourseGradeMode mode;
+  final ValueChanged<_CourseGradeMode> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        for (final (_CourseGradeMode value, String label) option
+            in const <(_CourseGradeMode, String)>[
+              (_CourseGradeMode.pending, '未出分'),
+              (_CourseGradeMode.gpa, '绩点'),
+              (_CourseGradeMode.pass, 'P'),
+              (_CourseGradeMode.noPass, 'NP'),
+            ])
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                right: option.$1 == _CourseGradeMode.noPass ? 0 : 6,
+              ),
+              child: _CourseGradeModeButton(
+                label: option.$2,
+                selected: option.$1 == mode,
+                onTap: () => onChanged(option.$1),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _CourseGradeModeButton extends StatelessWidget {
+  const _CourseGradeModeButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: 42,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? scheme.primary.withValues(alpha: 0.12)
+                : scheme.surface.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? scheme.primary : scheme.outlineVariant,
+            ),
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: selected ? scheme.primary : scheme.onSurface,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -688,7 +1107,7 @@ class _WeekGridBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final int maxPeriod = math.max(
       appState.settings.maxPeriodsPerDay,
-      _maxPeriod(appState.courses),
+      _maxPeriod(appState.scheduledCourses),
     );
     final List<DateTime> days = List<DateTime>.generate(
       7,
@@ -714,7 +1133,7 @@ class _WeekGridBody extends StatelessWidget {
           return SizedBox(
             height: viewportHeight,
             child: SingleChildScrollView(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: EdgeInsets.only(bottom: _mobileDockClearance(context)),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: SizedBox(
@@ -758,12 +1177,23 @@ class _WeekGridBody extends StatelessWidget {
     required double headH,
     required double rowH,
   }) {
-    final List<_GridBlock> blocks = _buildMergedBlocks(date);
-    return blocks.map((_GridBlock block) {
+    final List<_GridPlacement> placements = _layoutBlocks(date);
+    return placements.map((_GridPlacement placement) {
+      const double sidePadding = 4;
+      const double laneGap = 3;
+      final double contentLeft = leftW + dayIndex * dayW + sidePadding;
+      final double contentWidth = dayW - sidePadding * 2;
+      final double width =
+          (contentWidth -
+              laneGap *
+                  (placement.laneCount > 0 ? placement.laneCount - 1 : 0)) /
+          placement.laneCount;
+      final double left = contentLeft + placement.laneIndex * (width + laneGap);
+      final _GridBlock block = placement.block;
       return Positioned(
-        left: leftW + dayIndex * dayW + 4,
+        left: left,
         top: headH + (block.start - 1) * rowH + 4,
-        width: dayW - 8,
+        width: width,
         height: (block.end - block.start + 1) * rowH - 8,
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
@@ -788,7 +1218,7 @@ class _WeekGridBody extends StatelessWidget {
                 Text('${block.start}-${block.end} 节', maxLines: 1),
                 Text(
                   block.course.location.isEmpty
-                      ? '未设置地点'
+                      ? '地点待补充'
                       : block.course.location,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -801,9 +1231,102 @@ class _WeekGridBody extends StatelessWidget {
     }).toList();
   }
 
+  List<_GridPlacement> _layoutBlocks(DateTime date) {
+    final List<_GridBlock> blocks = _buildMergedBlocks(date);
+    if (blocks.isEmpty) {
+      return const <_GridPlacement>[];
+    }
+
+    blocks.sort((a, b) {
+      final int byStart = a.start.compareTo(b.start);
+      if (byStart != 0) {
+        return byStart;
+      }
+      final int byEnd = a.end.compareTo(b.end);
+      if (byEnd != 0) {
+        return byEnd;
+      }
+      return a.course.name.compareTo(b.course.name);
+    });
+
+    final List<_GridPlacement> placements = <_GridPlacement>[];
+    List<_GridBlock> currentGroup = <_GridBlock>[];
+    int groupEnd = -1;
+
+    for (final _GridBlock block in blocks) {
+      if (currentGroup.isEmpty) {
+        currentGroup = <_GridBlock>[block];
+        groupEnd = block.end;
+        continue;
+      }
+      if (block.start <= groupEnd) {
+        currentGroup.add(block);
+        groupEnd = math.max(groupEnd, block.end);
+        continue;
+      }
+      placements.addAll(_layoutConflictGroup(currentGroup));
+      currentGroup = <_GridBlock>[block];
+      groupEnd = block.end;
+    }
+
+    if (currentGroup.isNotEmpty) {
+      placements.addAll(_layoutConflictGroup(currentGroup));
+    }
+    return placements;
+  }
+
+  List<_GridPlacement> _layoutConflictGroup(List<_GridBlock> group) {
+    if (group.length == 1) {
+      return <_GridPlacement>[
+        _GridPlacement(block: group.first, laneIndex: 0, laneCount: 1),
+      ];
+    }
+
+    final List<_GridBlock> sorted = List<_GridBlock>.from(group)
+      ..sort((a, b) {
+        final int byStart = a.start.compareTo(b.start);
+        if (byStart != 0) {
+          return byStart;
+        }
+        return a.end.compareTo(b.end);
+      });
+
+    final List<int> laneEnds = <int>[];
+    final List<({int laneIndex, _GridBlock block})> indexed =
+        <({int laneIndex, _GridBlock block})>[];
+
+    for (final _GridBlock block in sorted) {
+      int laneIndex = -1;
+      for (int i = 0; i < laneEnds.length; i++) {
+        if (block.start > laneEnds[i]) {
+          laneIndex = i;
+          break;
+        }
+      }
+      if (laneIndex == -1) {
+        laneEnds.add(block.end);
+        laneIndex = laneEnds.length - 1;
+      } else {
+        laneEnds[laneIndex] = block.end;
+      }
+      indexed.add((laneIndex: laneIndex, block: block));
+    }
+
+    final int laneCount = laneEnds.length;
+    return indexed
+        .map(
+          (({int laneIndex, _GridBlock block}) item) => _GridPlacement(
+            block: item.block,
+            laneIndex: item.laneIndex,
+            laneCount: laneCount,
+          ),
+        )
+        .toList();
+  }
+
   List<_GridBlock> _buildMergedBlocks(DateTime date) {
     final List<_GridBlock> raw = <_GridBlock>[];
-    for (final Course course in appState.courses) {
+    for (final Course course in appState.scheduledCourses) {
       for (final CourseSession session in course.sessions) {
         if (!session.occursOn(date, appState.currentTermStartMonday)) {
           continue;
@@ -956,4 +1479,24 @@ class _GridBlock {
       end: end ?? this.end,
     );
   }
+}
+
+double _mobileDockClearance(BuildContext context) {
+  final bool mobile = MediaQuery.sizeOf(context).width < 720;
+  if (!mobile) {
+    return 12;
+  }
+  return MediaQuery.paddingOf(context).bottom + 108;
+}
+
+class _GridPlacement {
+  const _GridPlacement({
+    required this.block,
+    required this.laneIndex,
+    required this.laneCount,
+  });
+
+  final _GridBlock block;
+  final int laneIndex;
+  final int laneCount;
 }

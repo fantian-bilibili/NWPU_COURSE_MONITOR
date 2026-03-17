@@ -30,7 +30,7 @@ class FlutterWindow : public Win32Window {
   bool SetMiniWindowMode(bool enabled);
   bool SetMiniWindowDark(bool enabled);
   bool LaunchWindowProcess(bool launch_in_mini_mode);
-  bool SetAutoStart(bool enabled);
+  bool SetAutoStart(bool enabled, bool start_in_mini_mode);
   bool GetAutoStart() const;
   bool StartWindowDrag();
   void RefreshBottomZOrder();
