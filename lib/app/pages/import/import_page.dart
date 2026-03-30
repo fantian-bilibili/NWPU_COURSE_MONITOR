@@ -5,9 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
-import '../../models/models.dart';
-import '../../state/app_state.dart';
-import '../widgets/frosted_panel.dart';
+import '../../../models/models.dart';
+import '../../../state/app_state.dart';
+import '../../widgets/frosted_panel.dart';
 import 'jwxt_import_webview_page.dart';
 
 enum _ImportMode { merge, replace }

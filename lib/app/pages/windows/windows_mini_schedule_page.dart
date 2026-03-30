@@ -4,8 +4,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../models/models.dart';
-import '../../state/app_state.dart';
+import '../../../models/models.dart';
+import '../../../state/app_state.dart';
 
 class WindowsMiniSchedulePage extends StatefulWidget {
   const WindowsMiniSchedulePage({

@@ -5,11 +5,11 @@ import 'package:flutter/material.dart';
 
 import '../models/models.dart';
 import '../state/app_state.dart';
-import 'pages/gpa_page.dart';
-import 'pages/import_page.dart';
-import 'pages/schedule_page.dart';
-import 'pages/settings_page.dart';
-import 'pages/windows_mini_schedule_page.dart';
+import 'pages/gpa/gpa_page.dart';
+import 'pages/import/import_page.dart';
+import 'pages/schedule/schedule_page.dart';
+import 'pages/settings/settings_page.dart';
+import 'pages/windows/windows_mini_schedule_page.dart';
 import 'widgets/frosted_panel.dart';
 
 class CourseMonitorApp extends StatelessWidget {

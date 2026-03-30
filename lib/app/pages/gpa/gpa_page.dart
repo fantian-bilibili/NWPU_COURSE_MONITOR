@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../models/models.dart';
-import '../../state/app_state.dart';
-import '../widgets/frosted_panel.dart';
+import '../../../models/models.dart';
+import '../../../state/app_state.dart';
+import '../../widgets/frosted_panel.dart';
 
 class GpaPage extends StatelessWidget {
   const GpaPage({super.key, required this.appState});

@@ -3,10 +3,10 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
-import '../../models/models.dart';
-import '../../state/app_state.dart';
-import '../widgets/course_editor_dialog.dart';
-import '../widgets/frosted_panel.dart';
+import '../../../models/models.dart';
+import '../../../state/app_state.dart';
+import '../../widgets/course_editor_dialog.dart';
+import '../../widgets/frosted_panel.dart';
 
 enum _ScheduleMode { dayList, weekList, weekGrid }
 

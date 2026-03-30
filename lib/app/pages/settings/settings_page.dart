@@ -5,10 +5,10 @@ import 'package:intl/intl.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../generated/version_info.g.dart';
-import '../../models/models.dart';
-import '../../state/app_state.dart';
-import '../widgets/frosted_panel.dart';
+import '../../../generated/version_info.g.dart';
+import '../../../models/models.dart';
+import '../../../state/app_state.dart';
+import '../../widgets/frosted_panel.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.appState});
