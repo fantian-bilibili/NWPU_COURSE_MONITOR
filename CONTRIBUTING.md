@@ -1,46 +1,86 @@
 # Contributing Guide
 
+本文档面向继续维护本仓库的开发者与 AI 协作者。
+
 ## 分支策略
 
-- `main`：稳定发布分支，仅接收 `develop -> main` 的 PR。
-- `develop`：日常开发分支，所有开发提交先进入 `develop`。
+- `main`：稳定发布分支，仅接收经过验证的发布合并。
+- `develop`：日常开发主分支，功能开发与 bug 修复优先进入 `develop`。
 
-## 提交信息规范
+向 `develop` 提交前，确保：
 
-- 建议使用简洁的 Conventional Commits 风格：
-  - `feat: ...`
-  - `fix: ...`
-  - `docs: ...`
-  - `chore: ...`
+- `flutter analyze` 无警告
+- `flutter test` 通过
+- 已同步最新 `develop`（如有冲突请先 rebase）
 
-示例：
+向 `main` 提交仅通过 PR，禁止直接推送。
 
-```bash
-git commit -m "fix(import): improve jwxt location parsing"
-```
+## 文档阅读顺序
 
-## 代码注释要求
+建议新贡献者按以下顺序阅读文档：
 
-- 新增或修改复杂逻辑时，必须添加简短、直接的注释，说明“为什么这样实现”。
-- 对明显自解释的简单赋值/调用不写冗余注释。
-- 注释应随代码变更同步更新，避免过期说明。
+1. [根 README](./README.md)
+   - 先了解项目定位、当前版本、核心功能、版本同步方式和基本构建入口。
+2. [项目结构说明](./docs/PROJECT_STRUCTURE.md)
+   - 了解目录分层、运行时数据流、核心文件职责和高风险模块。
+3. [构建与发布指南](./docs/build/BUILD_AND_RELEASE.md)
+   - 了解版本同步、Android / Windows 构建、发布前检查与打包规范。
+4. [上游参考与归因](./docs/UPSTREAM_ATTRIBUTION.md)
+   - 了解教务导入相关参考来源和许可证归因要求。
 
-## 测试覆盖范围（截至 2026-03-02）
+## 目录说明
 
-- Android：已完成核心功能验证。
-- Windows / iOS：尚未完成系统性验证。
+- `PROJECT_STRUCTURE.md`
+  - 代码结构、运行时架构、核心业务流、高风险文件说明。
+- `build/BUILD_AND_RELEASE.md`
+  - 版本同步、构建命令、打包方式、发布验证清单。
+- `UPSTREAM_ATTRIBUTION.md`
+  - 第三方参考实现与许可证归因。
+- `references/`
+  - 参考实现快照，不参与当前 Flutter 运行时。
 
-## PR 流程
+## 面向 AI 交接的本地文档
 
-1. 变更先合入 `develop`。
-2. 开发完成后本地通过：
-   - `flutter analyze`
-   - `flutter test`
-3. 发布阶段发起 `develop -> main` PR。
-4. PR 描述需包含测试范围与风险点。
+如果你当前是在本地工作区里和另一套 AI 协作，优先再读：
 
-## 第三方代码与引用要求
+- `agent_handoff/README.md`
 
-- 引入或改写第三方代码时，必须更新 `docs/UPSTREAM_ATTRIBUTION.md`。
-- 必须保留对应许可证要求的版权声明。
-- 严禁提交 Cookie、Token、账号密码等敏感信息。
+说明：
+
+- `agent_handoff/` 是本地 handoff 包，默认被 `.gitignore` 忽略。
+- 它面向另一工作区的 AI 接手开发，内容比公开文档更偏执行与排障。
+- 如果你要迁移到新的工作区，需要手动复制整个 `agent_handoff/` 文件夹。
+
+## 文档维护规则
+
+- 行为变化时优先更新文档，而不是事后补文档。
+- 版本号变更时，至少检查：
+  - `README.md`
+  - `docs/build/BUILD_AND_RELEASE.md`
+  - `agent_handoff/README.md`
+  - `agent_handoff/01_project_snapshot.md`
+- 文档统一使用 `UTF-8` 编码。
+
+## 新功能放置顺序
+
+新增功能时，优先按下面顺序放代码：
+
+1. 数据结构：`lib/models/models.dart`
+2. 业务编排：`lib/state/app_state.dart`
+3. IO / 平台能力：`lib/services/...`
+4. 页面展示：`lib/app/pages/...`
+5. 通用 UI：`lib/app/widgets/...`
+
+## 不建议做的事
+
+- 不要把导入导出、通知、小组件逻辑直接写在页面里。
+- 不要绕开 `AppState` 在页面里直接操作持久化。
+- 不要把平台专有逻辑散落到多个页面里。
+- 不要为了"修编码"把中文重新改回 `\uXXXX`。
+
+## 开发约定
+
+- 用户可见中文统一直接写中文，不使用 `\uXXXX` 逃避编码问题。
+- Markdown / Dart / YAML 一律使用 `UTF-8` 保存。
+- 涉及第三方代码或参考实现时，必须同步更新 `docs/UPSTREAM_ATTRIBUTION.md`。
+- 涉及导入解析逻辑时，优先保留样本、截图、HTML 或接口响应，以便复现和调试。

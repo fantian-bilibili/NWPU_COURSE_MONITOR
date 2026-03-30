@@ -3,7 +3,7 @@
 
 const String kAppVersion = '1.0.2';
 const String kAppBuildNumber = '4';
-const String kAppChannel = 'develop';
-const String kAppDisplayVersion = '1.0.2.develop';
-const String kAppDisplayVersionWithBuild = '1.0.2.develop build4';
+const String kAppChannel = 'release';
+const String kAppDisplayVersion = '1.0.2.release';
+const String kAppDisplayVersionWithBuild = '1.0.2.release build4';
 const bool kAppIsStableChannel = kAppChannel == 'stable';
